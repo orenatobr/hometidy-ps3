@@ -334,7 +334,7 @@ static void testBadge() {
 static std::string tempDir(const char* name) {
     std::string base = std::string(std::getenv("TMPDIR") ? std::getenv("TMPDIR") : "/tmp") + "/hometidy_ps3_" + name + "_" +
                        std::to_string(std::rand());
-    std::system(("rm -rf '" + base + "'").c_str());
+    if (std::system(("rm -rf '" + base + "'").c_str()) != 0) std::printf("warning: could not clean %s\n", base.c_str());
     fsx::makeDirs(base);
     return base;
 }
