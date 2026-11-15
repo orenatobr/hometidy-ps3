@@ -1,0 +1,40 @@
+name: build
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  host-tests:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: tests/run.sh
+        env:
+          HOMETIDY_FONTS: data
+
+  ps3-pkg:
+    runs-on: ubuntu-24.04
+    env:
+      GH_TOKEN: ${{ github.token }}
+      PS3DEV: ${{ github.workspace }}/ps3dev-sdk
+      PSL1GHT: ${{ github.workspace }}/ps3dev-sdk
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install the ps3dev toolchain (prebuilt release)
+        run: |
+          mkdir -p "$PS3DEV"
+          gh release download nightly-2026-10-12 -R ps3dev/ps3dev -p ps3dev-linux-X64.tar.gz -D "$RUNNER_TEMP" \
+            || gh release download -R ps3dev/ps3dev -p ps3dev-linux-X64.tar.gz -D "$RUNNER_TEMP"
+          tar -xzf "$RUNNER_TEMP/ps3dev-linux-X64.tar.gz" -C "$PS3DEV" --strip-components=1
+          ls "$PS3DEV"
+      - name: Build HomeTidy.pkg
+        run: |
+          export PATH="$PATH:$PS3DEV/bin:$PS3DEV/ppu/bin:$PS3DEV/spu/bin"
+          make pkg
+          tools/dist.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: HomeTidy
+          path: dist/*

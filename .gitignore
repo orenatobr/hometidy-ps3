@@ -1,0 +1,14 @@
+build/
+*.elf
+*.self
+*.pkg
+*.map
+*.lst
+*.o
+*.d
+shots/
+fake_console/
+__pycache__/
+.DS_Store
+._*
+dist/
