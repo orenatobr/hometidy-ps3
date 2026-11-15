@@ -50,7 +50,7 @@ void onSysutil(u64 status, u64 /*param*/, void* /*usrdata*/) {
 void waitFinish() {
     rsxSetWriteBackendLabel(g_context, kLabel, g_label);
     rsxFlushBuffer(g_context);
-    while (*(vu32*)gcmGetLabelAddress(kLabel) != g_label) usleep(30);
+    for (int i = 0; i < 100000 && *(vu32*)gcmGetLabelAddress(kLabel) != g_label; ++i) usleep(30);  // about 3 s at most
     ++g_label;
 }
 
@@ -62,7 +62,7 @@ void waitIdle() {
 }
 
 void waitFlip() {
-    while (gcmGetFlipStatus() != 0) usleep(200);
+    for (int i = 0; i < 10000 && gcmGetFlipStatus() != 0; ++i) usleep(200);  // about 2 s at most
     gcmResetFlipStatus();
 }
 
@@ -74,6 +74,8 @@ struct Held {
 };
 Held g_held[12];  // up down left right a b x y l r l2 r2
 bool g_circleConfirms = false;
+padData g_lastPad[7];  // ioPadGetData only fills the data when the input changed: keep the last frame per port
+bool g_lastValid[7] = {false, false, false, false, false, false, false};
 std::string g_appDir;
 FILE* g_log = nullptr;
 
@@ -148,7 +150,11 @@ void videoPresent(const std::uint32_t* pixels) {
 
 void videoShutdown() {
     if (!g_context) return;
-    if (!g_firstFlip) waitFlip();
+    if (g_firstFlip) {  // no flip was ever queued: do not wait for one
+        waitFinish();
+        return;
+    }
+    waitFlip();
     gcmSetWaitFlip(g_context);
     rsxFinish(g_context, 1);
 }
@@ -219,9 +225,18 @@ Input poll() {
         padInfo info;
         ioPadGetInfo(&info);
         for (int i = 0; i < 7; ++i) {
-            if (!info.status[i]) continue;
-            padData d;
-            ioPadGetData(i, &d);
+            if (!info.status[i]) {
+                g_lastValid[i] = false;
+                continue;
+            }
+            padData fresh;
+            memset(&fresh, 0, sizeof fresh);
+            if (ioPadGetData(i, &fresh) == 0 && fresh.len > 0) {
+                g_lastPad[i] = fresh;
+                g_lastValid[i] = true;
+            }
+            if (!g_lastValid[i]) continue;  // nothing read yet: treat as neutral
+            const padData& d = g_lastPad[i];
             up |= d.BTN_UP;
             down |= d.BTN_DOWN;
             left |= d.BTN_LEFT;
@@ -274,7 +289,12 @@ std::string timestamp() {
     return buf;
 }
 
-void sleepMs(int ms) { usleep(static_cast<useconds_t>(ms) * 1000); }
+void sleepMs(int ms) {
+    for (; ms > 0; ms -= 50) {  // keep serving system events (PS button, quit) while waiting
+        sysUtilCheckCallback();
+        usleep(static_cast<useconds_t>(ms < 50 ? ms : 50) * 1000);
+    }
+}
 
 void log(const char* fmt, ...) {
     if (!g_log) return;

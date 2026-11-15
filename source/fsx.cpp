@@ -9,20 +9,16 @@
 namespace fsx {
 
 bool readBytes(const std::string& path, std::vector<std::uint8_t>& out, std::size_t maxBytes) {
+    out.clear();
     FILE* f = std::fopen(path.c_str(), "rb");
     if (!f) return false;
-    out.clear();
-    std::uint8_t buf[8192];
-    std::size_t n;
-    bool ok = true;
-    while ((n = std::fread(buf, 1, sizeof buf, f)) > 0) {
-        if (out.size() + n > maxBytes) {
-            ok = false;
-            break;
-        }
-        out.insert(out.end(), buf, buf + n);
+    bool ok = std::fseek(f, 0, SEEK_END) == 0;
+    const long size = ok ? std::ftell(f) : -1;
+    ok = ok && size >= 0 && static_cast<std::size_t>(size) <= maxBytes && std::fseek(f, 0, SEEK_SET) == 0;
+    if (ok) {
+        out.resize(static_cast<std::size_t>(size));
+        ok = size == 0 || std::fread(out.data(), 1, out.size(), f) == out.size();
     }
-    ok = ok && !std::ferror(f);
     std::fclose(f);
     if (!ok) out.clear();
     return ok;
@@ -89,7 +85,10 @@ std::vector<std::string> listDir(const std::string& path) {
 
 bool renameFile(const std::string& from, const std::string& to) {
     if (std::rename(from.c_str(), to.c_str()) == 0) return true;
-    // Some file systems refuse to replace an existing target.
+    // Some file systems refuse to replace an existing target: retry only when the source is readable.
+    FILE* src = std::fopen(from.c_str(), "rb");
+    if (!src) return false;
+    std::fclose(src);
     std::remove(to.c_str());
     return std::rename(from.c_str(), to.c_str()) == 0;
 }
