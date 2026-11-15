@@ -47,6 +47,21 @@ def cover(name: str, size: int = 160, alpha: int = 255) -> Image.Image:
     return im
 
 
+def mark(im: Image.Image, ratio: float = 0.15) -> Image.Image:
+    """Draws the completion badge the same way the ps3tweaks FTP cover marker does."""
+    im = im.convert("RGBA")
+    d = ImageDraw.Draw(im)
+    base = min(im.size)
+    size, margin = max(18, int(base * ratio)), max(6, int(base * 0.02))
+    x0 = y0 = margin
+    d.rounded_rectangle([x0, y0, x0 + size, y0 + size], radius=max(4, size // 6), fill=(27, 158, 50, 230),
+                        outline=(255, 255, 255, 240), width=max(1, size // 15))
+    pts = [(x0 + int(size * 0.22), y0 + int(size * 0.55)), (x0 + int(size * 0.43), y0 + int(size * 0.75)),
+           (x0 + int(size * 0.78), y0 + int(size * 0.30))]
+    d.line(pts, fill=(255, 255, 255, 255), width=max(2, size // 9), joint="curve")
+    return im
+
+
 def entry(key: str, title: str, folder: str, fname: str) -> str:
     return (f'<T key="{key}" include="inc"><P key="icon"><>/dev_hdd0/{folder}/{fname}.png</></P>'
             f'<P key="title"><>{title}</></P><P key="module_action"><>/mount_ps3/dev_hdd0/{folder}/{fname}.iso</></P>'
@@ -70,13 +85,8 @@ def main(root: Path) -> None:
             (d / f"{t}.iso").write_bytes(b"iso")
             if i % 7 != 3:  # a few games without a cover
                 cover(t).save(d / f"{t}.png")
-    # one cover already marked by the Python tool
-    sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "PS3" / "src"))
-    try:
-        from ps3tweaks.ftp_cover_marker import add_completion_badge
-        add_completion_badge(cover(PS3[4]), 0.15).save(hdd / "PS3ISO" / f"{PS3[4]}.png")
-    except Exception:
-        pass
+    # one cover already marked by another tool (the ps3tweaks FTP marker draws this same badge)
+    mark(cover(PS3[4])).save(hdd / "PS3ISO" / f"{PS3[4]}.png")
     xml = ('<?xml version="1.0" encoding="UTF-8"?><X version="1.0"><V id="seg_mygames"><A><T key="wm_ps3"><P key="title"><>PLAYSTATION®3</></P>'
            f'<P key="info"><>{len(PS3)} Jogos PS3</></P></T></A><I><Q class="type:x-xmb/folder-pixmap" key="wm_ps3" attr="wm_ps3" src="#seg_wm_ps3_items"/></I></V>'
            + segment("ps3", "PS3ISO", PS3, 3) + segment("ps2", "PS2ISO", PS2, 5) + segment("psx", "PSXISO", PSX, 7) + "</X>")

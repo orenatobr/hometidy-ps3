@@ -602,7 +602,11 @@ void App::drawMark() {
                 c_.blit(*cv.tex, x + 12, y + 10, 124, 124, 8);
             } else {
                 c_.fill(x + 12, y + 10, 124, 124, 8, col::line);
-                c_.text(tr(Id::NoCover), Size::Small, col::muted, x + 74, y + 60, Align::Center, 112);
+                const auto words = c_.wrap(tr(Id::NoCover), Size::Small, 108);
+                const int top = y + 72 - int(words.size()) * 12;
+                for (std::size_t k = 0; k < words.size(); ++k) {
+                    c_.text(words[k], Size::Small, col::muted, x + 74, top + int(k) * 24, Align::Center, 112);
+                }
             }
             if (cv.state == tasks::CoverState::Marked) c_.checkBadge(x + 118, y + 28, 16, col::green, col::bg);
             auto lines = c_.wrap(g.title, Size::Small, kTileW - 16);
