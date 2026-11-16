@@ -35,6 +35,7 @@ private:
     struct Cover {
         std::shared_ptr<gfx::Texture> tex;
         tasks::CoverState state = tasks::CoverState::Unreadable;
+        bool loading = false;  ///< Not decoded yet (frame budget spent); drawn as a blank tile.
     };
     enum class Btn { Confirm, Back, Triangle, Square, L1, R1, L2, R2, DPad };
     struct Hint {
@@ -68,7 +69,9 @@ private:
     void toastDraw();
     void toast(const std::string& text, gfx::Color color);
     void showMessage(const std::string& title, const std::string& body, gfx::Color color, Screen back);
-    Cover& cover(const library::Game& g);
+    /// Cached cover. A miss decodes the image unless `urgent` is false and this frame's decode budget is spent;
+    /// then a blank "loading" cover comes back and the next frame is requested.
+    Cover& cover(const library::Game& g, bool urgent = true);
     void dropCover(const std::string& path);
     std::string statusText(tasks::Status s) const;
     const library::Game* currentGame() const;
@@ -91,6 +94,7 @@ private:
     std::vector<library::Game> games_;  ///< Sorted like the list, covers or not.
     std::vector<library::Platform> tabs_;
     std::map<std::string, Cover> covers_;
+    int decodeBudget_ = 0;  ///< Cover decodes still allowed in the frame being drawn.
 
     // home
     int homeFocus_ = 0;
