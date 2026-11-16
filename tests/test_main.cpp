@@ -511,6 +511,23 @@ static void testGfx() {
     CHECK_EQ(pixelAt(c, 150, 150), 0xFF000000u);   // the inside stays empty
     CHECK(pixelAt(c, 150, 102) != 0xFF000000u);    // the border is painted
 
+    // thumbnails: box filter keeps colour and alpha, and a 1:1 blit matches the size
+    {
+        const badge::Image im = makeCover(300, 200);
+        const auto th = gfx::Canvas::thumbnail(im.rgba, im.w, im.h, 124, 124);
+        CHECK(th && th->w == 124 && th->h == 124);
+        if (th) {
+            const std::uint32_t mid = th->px[62 * 124 + 62];
+            CHECK_EQ(mid >> 24, 255u);
+            CHECK(std::abs(int((mid >> 16) & 0xFF) - (40 + 150 * 120 / 300)) < 6);
+            c.clear({0, 0, 0});
+            c.blit(*th, 20, 20, 124, 124, 8);
+            CHECK_EQ(pixelAt(c, 20 + 62, 20 + 62), mid);  // copied, not resampled
+            CHECK_EQ(pixelAt(c, 20, 20), 0xFF000000u);     // rounded corner masked
+        }
+        CHECK(!gfx::Canvas::thumbnail(im.rgba, 0, 0, 124, 124));
+    }
+
     // text
     CHECK(c.textWidth("HomeTidy", gfx::Size::Body) > 80);
     CHECK(c.textWidth("HomeTidy", gfx::Size::Large) > c.textWidth("HomeTidy", gfx::Size::Body));
@@ -635,7 +652,12 @@ static void testApp() {
     app.update(press('r'));
     app.update(press('A'));
     CHECK(app.screen() == App::Screen::Mark);
+    app.takeDirty();
     app.draw();
+    CHECK(app.takeDirty());   // covers load one per frame: the first draw leaves one pending
+    app.draw();
+    app.draw();
+    CHECK(!app.takeDirty());  // all loaded, no more redraws requested
     const std::string coverPath = hdd + "/PS3ISO/Alpha Protocol (USA).png";  // first in order
     app.update(press('A'));
     CHECK(tasks::coverState(coverPath) == tasks::CoverState::Marked);

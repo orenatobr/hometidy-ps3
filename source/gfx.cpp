@@ -330,11 +330,70 @@ std::shared_ptr<Texture> Canvas::texture(const std::vector<std::uint8_t>& rgba, 
     return t;
 }
 
+int Canvas::pixels(int logical) const { return std::max(1, int(mathx::iround(logical * scale_))); }
+
+std::shared_ptr<Texture> Canvas::thumbnail(const std::vector<std::uint8_t>& rgba, int w, int h, int tw, int th) {
+    if (w <= 0 || h <= 0 || tw <= 0 || th <= 0 || rgba.size() < std::size_t(w) * h * 4) return nullptr;
+    auto t = std::make_shared<Texture>();
+    t->w = tw;
+    t->h = th;
+    t->px.resize(std::size_t(tw) * th);
+    for (int ty = 0; ty < th; ++ty) {
+        const int y0 = int(std::int64_t(ty) * h / th), y1 = std::max(y0 + 1, int(std::int64_t(ty + 1) * h / th));
+        for (int tx = 0; tx < tw; ++tx) {
+            const int x0 = int(std::int64_t(tx) * w / tw), x1 = std::max(x0 + 1, int(std::int64_t(tx + 1) * w / tw));
+            std::uint32_t r = 0, g = 0, b = 0, a = 0;
+            for (int yy = y0; yy < y1; ++yy) {
+                const std::uint8_t* p = &rgba[(std::size_t(yy) * w + x0) * 4];
+                for (int xx = x0; xx < x1; ++xx, p += 4) {
+                    r += p[0] * p[3];
+                    g += p[1] * p[3];
+                    b += p[2] * p[3];
+                    a += p[3];
+                }
+            }
+            const std::uint32_t n = std::uint32_t(x1 - x0) * std::uint32_t(y1 - y0);
+            t->px[std::size_t(ty) * tw + tx] = ((a / n) << 24) | ((r / (255 * n)) << 16) | ((g / (255 * n)) << 8) | (b / (255 * n));
+        }
+    }
+    return t;
+}
+
 void Canvas::blit(const Texture& t, int x, int y, int w, int h, int radius) {
     if (t.w <= 0 || t.h <= 0 || w <= 0 || h <= 0) return;
     const double X0 = sx(x), Y0 = sy(y), X1 = sx(x + w), Y1 = sy(y + h);
     const double cx = (X0 + X1) / 2, cy = (Y0 + Y1) / 2, hx = (X1 - X0) / 2, hy = (Y1 - Y0) / 2;
     const double r = std::clamp(radius * scale_, 0.0, std::min(hx, hy));
+    if (std::fabs((X1 - X0) - t.w) < 1 && std::fabs((Y1 - Y0) - t.h) < 1) {
+        // 1:1 copy: no resampling, and the rounded-corner mask only matters near the corners.
+        const int ox = int(mathx::iround(X0)), oy = int(mathx::iround(Y0)), band = int(std::ceil(r)) + 1;
+        for (int ty = 0; ty < t.h; ++ty) {
+            const int py = oy + ty;
+            if (py < 0 || py >= h_) continue;
+            const bool edgeRow = ty < band || ty >= t.h - band;
+            for (int tx = 0; tx < t.w; ++tx) {
+                const int px = ox + tx;
+                if (px < 0 || px >= w_) continue;
+                const std::uint32_t s = t.px[std::size_t(ty) * t.w + tx];
+                double mask = 1;
+                if (edgeRow && (tx < band || tx >= t.w - band)) {
+                    mask = std::clamp(0.5 - roundBox(px + 0.5, py + 0.5, ox + t.w / 2.0, oy + t.h / 2.0, t.w / 2.0, t.h / 2.0, r), 0.0, 1.0);
+                    if (mask <= 0) continue;
+                }
+                std::uint32_t& d = buf_[std::size_t(py) * w_ + px];
+                if (mask >= 1 && (s >> 24) == 255) {
+                    d = s | 0xFF000000u;
+                    continue;
+                }
+                const double sa = (s >> 24) * mask, inv = 1 - sa / 255.0;
+                const int rr = std::min(255, int(((s >> 16) & 0xFF) * mask + ((d >> 16) & 0xFF) * inv + 0.5));
+                const int gg = std::min(255, int(((s >> 8) & 0xFF) * mask + ((d >> 8) & 0xFF) * inv + 0.5));
+                const int bb = std::min(255, int((s & 0xFF) * mask + (d & 0xFF) * inv + 0.5));
+                d = pack(rr, gg, bb);
+            }
+        }
+        return;
+    }
     const int ix0 = std::max(0, int(std::floor(X0))), ix1 = std::min(w_, int(std::ceil(X1)));
     const int iy0 = std::max(0, int(std::floor(Y0))), iy1 = std::min(h_, int(std::ceil(Y1)));
     auto texel = [&](int tx, int ty) { return t.px[std::size_t(std::clamp(ty, 0, t.h - 1)) * t.w + std::clamp(tx, 0, t.w - 1)]; };

@@ -87,7 +87,12 @@ public:
 
     /// Creates a texture from top-down straight RGBA pixels.
     static std::shared_ptr<Texture> texture(const std::vector<std::uint8_t>& rgba, int w, int h);
+    /// Like texture(), but box-filtered down to tw x th pixels so blit() can copy it 1:1.
+    static std::shared_ptr<Texture> thumbnail(const std::vector<std::uint8_t>& rgba, int w, int h, int tw, int th);
+    /// Size in pixels of a logical length at the current scale.
+    int pixels(int logical) const;
     /// Draws the texture scaled to the logical rectangle with rounded corners (radius 0 = square).
+    /// A texture already sized to the rectangle in pixels is copied without resampling.
     void blit(const Texture& t, int x, int y, int w, int h, int radius = 0);
 
 private:

@@ -22,6 +22,7 @@ constexpr int kGridCols = 7;
 constexpr int kGridRows = 2;
 constexpr int kTileW = 148;
 constexpr int kTileH = 186;
+constexpr int kCoverSize = 124;  // cover square inside a tile, in logical pixels
 constexpr int kTileGap = 14;
 constexpr const char* kVersion = "v1.0.0";
 
@@ -326,14 +327,21 @@ void App::showMessage(const std::string& title, const std::string& body, gfx::Co
     screen_ = Screen::Message;
 }
 
-App::Cover& App::cover(const library::Game& g) {
+App::Cover& App::cover(const library::Game& g, bool urgent) {
     auto it = covers_.find(g.image);
     if (it != covers_.end()) return it->second;
+    if (!urgent && decodeBudget_ <= 0) {
+        static Cover pending;
+        pending.loading = true;
+        dirty_ = true;
+        return pending;
+    }
+    if (!urgent) --decodeBudget_;
     Cover cv;
     std::vector<std::uint8_t> file;
     badge::Image img;
     if (!g.image.empty() && fsx::readBytes(g.image, file, 16u * 1024 * 1024) && badge::decode(file, img)) {
-        cv.tex = c_.texture(img.rgba, img.w, img.h);
+        cv.tex = gfx::Canvas::thumbnail(img.rgba, img.w, img.h, c_.pixels(kCoverSize), c_.pixels(kCoverSize));
         cv.state = badge::isMarked(img) ? tasks::CoverState::Marked : tasks::CoverState::Plain;
     }
     if (covers_.size() > 160) covers_.clear();  // keep memory bounded
@@ -572,6 +580,8 @@ void App::drawMark() {
     header(tr(Id::MarkTitle));
     const auto idx = tabGames();
     const int n = int(idx.size());
+    decodeBudget_ = 1;  // one decode per frame keeps the d-pad responsive while covers fill in
+    if (const library::Game* cur = currentGame()) cover(*cur);  // the selected one first
 
     // platform tabs
     int tx = kMargin;
@@ -597,9 +607,11 @@ void App::drawMark() {
             const bool sel = i == markSel_;
             if (sel) c_.fill(x - 5, y - 5, kTileW + 10, kTileH + 10, 20, col::green);
             c_.card(x, y, kTileW, kTileH, 16, sel ? col::raised : col::card, 2, col::line);
-            Cover& cv = cover(g);
+            Cover& cv = cover(g, false);
             if (cv.tex) {
-                c_.blit(*cv.tex, x + 12, y + 10, 124, 124, 8);
+                c_.blit(*cv.tex, x + 12, y + 10, kCoverSize, kCoverSize, 8);
+            } else if (cv.loading) {
+                c_.fill(x + 12, y + 10, kCoverSize, kCoverSize, 8, col::line);
             } else {
                 c_.fill(x + 12, y + 10, 124, 124, 8, col::line);
                 const auto words = c_.wrap(tr(Id::NoCover), Size::Small, 108);
@@ -617,6 +629,13 @@ void App::drawMark() {
             for (std::size_t k = 0; k < lines.size(); ++k) {
                 c_.text(lines[k], Size::Small, col::text, x + kTileW / 2, y + 138 + int(k) * 22, Align::Center, kTileW - 12);
             }
+        }
+    }
+    // Warm the rows just off screen, one cover per frame, so the next scroll finds them ready.
+    for (int row : {markScroll_ + kGridRows, markScroll_ - 1}) {
+        for (int cIdx = 0; row >= 0 && cIdx < kGridCols; ++cIdx) {
+            const int i = row * kGridCols + cIdx;
+            if (i < n) cover(games_[std::size_t(idx[std::size_t(i)])], false);
         }
     }
     // detail strip
