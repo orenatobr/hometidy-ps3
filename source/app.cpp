@@ -24,7 +24,7 @@ constexpr int kTileW = 148;
 constexpr int kTileH = 186;
 constexpr int kCoverSize = 124;  // cover square inside a tile, in logical pixels
 constexpr int kTileGap = 14;
-constexpr const char* kVersion = "v1.0.0";
+constexpr const char* kVersion = "v1.0.1";
 
 const gfx::Color kBlue{125, 159, 214};
 const gfx::Color kPink{217, 140, 179};
