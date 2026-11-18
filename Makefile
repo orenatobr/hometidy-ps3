@@ -2,9 +2,17 @@
 # HomeTidy for PS3 (PSL1GHT). Needs the ps3dev toolchain: export PS3DEV=<path> PSL1GHT=<path>.
 #   make        builds HomeTidy.self
 #   make pkg    builds HomeTidy.pkg (installable with "Install Package Files" on a CFW console)
+#   needs python3 with Pillow: the package art carries the version (tools/make_art.py)
 #---------------------------------------------------------------------------------
 .SUFFIXES:
 #---------------------------------------------------------------------------------
+MKROOT		:=	$(dir $(abspath $(firstword $(MAKEFILE_LIST))))
+
+# The release version (VERSION) is the single source: the app title bar, PARAM.SFO, the package art and the file names.
+# PARAM.SFO only holds two numbers (NN.NN), so the second one is minor * 10 + patch (1.0.2 -> 01.02, 1.1.0 -> 01.10).
+VERSION		:=	$(strip $(shell cat $(MKROOT)VERSION))
+APP_VER		:=	$(shell sh $(MKROOT)tools/prepare.sh $(MKROOT) >/dev/null && cat $(MKROOT)build/app_ver)
+
 ifeq ($(strip $(PSL1GHT)),)
 $(error "Please set PSL1GHT in your environment. export PSL1GHT=<path to ps3dev>")
 endif
@@ -27,15 +35,15 @@ INCLUDES	:=	source third_party/stb
 TITLE		:=	HomeTidy
 APPID		:=	HTDY00001
 CONTENTID	:=	UP0001-$(APPID)_00-0000000000000000
-SFOXML		:=	$(CURDIR)/pkg/sfo.xml
-ICON0		:=	$(CURDIR)/pkg/ICON0.PNG
-PKGFILES	:=	$(CURDIR)/pkg/files
+SFOXML		:=	$(MKROOT)build/sfo.xml
+ICON0		:=	$(MKROOT)build/art/ICON0.PNG
+PKGFILES	:=	$(MKROOT)build/art/files
 
 #---------------------------------------------------------------------------------
 # options for code generation
 #---------------------------------------------------------------------------------
 CFLAGS		=	-O2 -Wall -mcpu=cell $(MACHDEP) $(INCLUDE)
-CXXFLAGS	=	$(CFLAGS) $(CXXFLAGS_INIT) -std=gnu++20
+CXXFLAGS	=	$(CFLAGS) $(CXXFLAGS_INIT) -std=gnu++20 -DAPP_VERSION=\"$(VERSION)\"
 
 LDFLAGS		=	$(MACHDEP) -Wl,-Map,$(notdir $@).map
 

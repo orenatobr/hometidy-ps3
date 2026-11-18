@@ -13,6 +13,8 @@ jobs:
       - run: tests/run.sh
         env:
           HOMETIDY_FONTS: data
+      - name: The changelog has notes for this version
+        run: tools/release_notes.sh
 
   ps3-pkg:
     runs-on: ubuntu-24.04
@@ -29,12 +31,14 @@ jobs:
             || gh release download -R ps3dev/ps3dev -p ps3dev-linux-X64.tar.gz -D "$RUNNER_TEMP"
           tar -xzf "$RUNNER_TEMP/ps3dev-linux-X64.tar.gz" -C "$PS3DEV" --strip-components=1
           ls "$PS3DEV"
-      - name: Build HomeTidy.pkg
+      - name: Install Pillow (the package art carries the version)
+        run: sudo apt-get install -y python3-pil
+      - name: Build the package
         run: |
           export PATH="$PATH:$PS3DEV/bin:$PS3DEV/ppu/bin:$PS3DEV/spu/bin"
           make pkg
           tools/dist.sh
       - uses: actions/upload-artifact@v4
         with:
-          name: HomeTidy
+          name: hometidy_ps3
           path: dist/*

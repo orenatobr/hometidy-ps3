@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Generates pkg/ICON0.PNG (320x176, the XMB icon) and pkg/files/PIC1.PNG (1920x1080, the XMB background)."""
+"""Generates ICON0.PNG (320x176, the XMB icon) and files/PIC1.PNG (1920x1080, the XMB background) with the version.
+
+Usage: tools/make_art.py [OUT_DIR]   (default build/art; the version is read from VERSION)
+"""
+import sys
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
@@ -7,6 +11,7 @@ from PIL import Image, ImageDraw, ImageFont
 ROOT = Path(__file__).resolve().parent.parent
 BG, CARD, GREEN, GREEN_DARK, WHITE, MUTED = (15, 23, 42), (25, 33, 52), (34, 197, 94), (21, 128, 61), (248, 250, 252), (148, 163, 184)
 BOLD, REGULAR = ROOT / "data" / "inter_bold.ttf", ROOT / "data" / "inter_regular.ttf"
+VERSION = "v" + (ROOT / "VERSION").read_text().strip()
 
 
 def font(path: Path, size: int) -> ImageFont.FreeTypeFont:
@@ -35,8 +40,9 @@ def icon() -> Image.Image:
     d = ImageDraw.Draw(im)
     d.rounded_rectangle((12 * s, 12 * s, w - 12 * s, h - 12 * s), radius=22 * s, fill=CARD + (255,))
     bars(d, 36 * s, 34 * s, 7 * s)
-    badge(d, 238 * s, 78 * s, 42 * s)
-    d.text((w // 2, 140 * s), "HomeTidy", font=font(BOLD, 30 * s), fill=WHITE, anchor="mm")
+    badge(d, 238 * s, 66 * s, 38 * s)
+    d.text((w // 2, 127 * s), "HomeTidy", font=font(BOLD, 28 * s), fill=WHITE, anchor="mm")
+    d.text((w // 2, 154 * s), VERSION, font=font(REGULAR, 15 * s), fill=MUTED, anchor="mm")
     return im.resize((320, 176), Image.LANCZOS)
 
 
@@ -53,11 +59,13 @@ def background() -> Image.Image:
     badge(d, w // 2, h // 2 - 70, 120, GREEN_DARK, WHITE)
     d.text((w // 2, h // 2 + 120), "HomeTidy", font=font(BOLD, 110), fill=WHITE, anchor="mm")
     d.text((w // 2, h // 2 + 210), "Sort your game list. Mark what you finished.", font=font(REGULAR, 42), fill=MUTED, anchor="mm")
+    d.text((w // 2, h // 2 + 290), VERSION, font=font(REGULAR, 38), fill=GREEN, anchor="mm")
     return im
 
 
 if __name__ == "__main__":
-    (ROOT / "pkg" / "files").mkdir(parents=True, exist_ok=True)
-    icon().save(ROOT / "pkg" / "ICON0.PNG")
-    background().save(ROOT / "pkg" / "files" / "PIC1.PNG")
-    print("art written to pkg/")
+    out = Path(sys.argv[1]) if len(sys.argv) > 1 else ROOT / "build" / "art"
+    (out / "files").mkdir(parents=True, exist_ok=True)
+    icon().save(out / "ICON0.PNG")
+    background().save(out / "files" / "PIC1.PNG")
+    print(f"art {VERSION} written to {out}")
