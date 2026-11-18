@@ -32,7 +32,7 @@ jobs:
           tar -xzf "$RUNNER_TEMP/ps3dev-linux-X64.tar.gz" -C "$PS3DEV" --strip-components=1
           ls "$PS3DEV"
       - name: Install Pillow (the package art carries the version)
-        run: sudo apt-get install -y python3-pil
+        run: sudo apt-get update && sudo apt-get install -y python3-pil
       - name: Build the package
         run: |
           export PATH="$PATH:$PS3DEV/bin:$PS3DEV/ppu/bin:$PS3DEV/spu/bin"
