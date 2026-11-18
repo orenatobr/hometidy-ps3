@@ -122,6 +122,37 @@ static void testFinalFantasyTactics() {
                 "Final Fantasy X (USA)", "Final Fantasy XIV (USA)", "Final Fantasy Tactics (USA)", "Folklore (USA)"}));
 }
 
+// The classic Tomb Raiders are ordered by release date: the title that carries no number ("The Last Revelation")
+// must not jump ahead of II and III the way an unlisted subtitle without a number does.
+static void testTombRaiderOrder() {
+    using V = std::vector<std::string>;
+    const V byDate = {"Tomb Raider (USA)", "Tomb Raider II - Starring Lara Croft (USA)",
+                      "Tomb Raider III - Adventures of Lara Croft (USA)", "Tomb Raider - The Last Revelation (USA)",
+                      "Tomb Raider Chronicles (USA)", "Tomb Raider - The Angel of Darkness (USA)", "Tomb Raider Legend",
+                      "Tomb Raider Anniversary", "Tomb Raider Underworld", "Tomb Raider Trilogy"};
+    V shuffled = byDate;
+    std::reverse(shuffled.begin(), shuffled.end());
+    CHECK_EQ(sortTitles(shuffled), byDate);
+    // the names the console shows (the hyphen turned into a colon, the "The" kept)
+    CHECK_EQ(sortTitles({"Tomb Raider: The Last Revelation", "Tomb Raider III: Adventures of Lara Croft", "Tomb Raider II: Starring Lara Croft",
+                         "Tomb Raider"}),
+             (V{"Tomb Raider", "Tomb Raider II: Starring Lara Croft", "Tomb Raider III: Adventures of Lara Croft",
+                "Tomb Raider: The Last Revelation"}));
+    // they stay together, between Tom Clancy and Tony Hawk
+    CHECK_EQ(sortTitles({"Tony Hawk's Pro Skater", "Tomb Raider II", "Tekken 3", "Tomb Raider"}),
+             (V{"Tekken 3", "Tomb Raider", "Tomb Raider II", "Tony Hawk's Pro Skater"}));
+}
+
+// Same defect as Tomb Raider, found in the user's PS1 list: a title without a number in its name ("Year of the Dragon",
+// "Mythologies") used to jump ahead of the numbered ones, so Spyro 3 came before Spyro 2.
+static void testPs1SequelsWithoutNumbers() {
+    using V = std::vector<std::string>;
+    CHECK_EQ(sortTitles({"Spyro: Year of the Dragon", "Spyro 2: Ripto's Rage!", "Spyro the Dragon"}),
+             (V{"Spyro the Dragon", "Spyro 2: Ripto's Rage!", "Spyro: Year of the Dragon"}));
+    CHECK_EQ(sortTitles({"Mortal Kombat Mythologies: Sub-Zero", "Mortal Kombat Trilogy"}),
+             (V{"Mortal Kombat Trilogy", "Mortal Kombat Mythologies: Sub-Zero"}));
+}
+
 // The list shown by the user's console: the new order must be the expected one.
 static void testUserLibrary() {
     const std::vector<std::string> shelf = {
@@ -703,6 +734,8 @@ int main() {
     testRules();
     testSeriesOrder();
     testFinalFantasyTactics();
+    testTombRaiderOrder();
+    testPs1SequelsWithoutNumbers();
     testUserLibrary();
     testBalanced();
     testMygames();

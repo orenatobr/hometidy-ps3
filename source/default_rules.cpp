@@ -247,6 +247,8 @@ gran turismo 6                  | gran turismo | 2013-12
 mass effect 3                   | mass effect | 2012-03
 mass effect 2                   | mass effect | 2011-01
 mortal kombat vs dc universe    | mortal kombat | 2008-11
+mortal kombat mythologies       | mortal kombat | 1997-10
+mortal kombat trilogy           | mortal kombat | 1996-10
 mortal kombat shaolin monks     | mortal kombat | 2005-10
 mortal kombat 9                 | mortal kombat | 2011-04
 mortal kombat komplete edition  | mortal kombat | 2011-04
@@ -278,9 +280,22 @@ prince of persia the sands of time | prince of persia | 2003-11
 prince of persia trilogy        | prince of persia | 2010-12
 prince of persia classic trilogy | prince of persia | 2010-12
 prince of persia                | prince of persia | 2008-12
+spyro year of the dragon        | spyro | 2000-10
+spyro 2                         | spyro | 1999-11
+spyro the dragon                | spyro | 1998-09
 skate 3                         | skate | 2010-05
 skate 2                         | skate | 2009-01
 skate                           | skate | 2007-09
+tomb raider the angel of darkness | tomb raider | 2003-06
+tomb raider the last revelation | tomb raider | 1999-11
+tomb raider chronicles          | tomb raider | 2000-11
+tomb raider anniversary         | tomb raider | 2007-10
+tomb raider underworld          | tomb raider | 2008-11
+tomb raider legend              | tomb raider | 2006-04
+tomb raider trilogy             | tomb raider | 2011-03
+tomb raider iii                 | tomb raider | 1998-11
+tomb raider ii                  | tomb raider | 1997-11
+tomb raider                     | tomb raider | 1996-11
 zone of the enders hd collection | zone of the enders | 2012-10
 zone of the enders              | zone of the enders | 2001-03
 )RULES";

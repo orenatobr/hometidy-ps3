@@ -2,6 +2,11 @@
 
 Every release lists what changed here, newest first. The section of a version is its release notes: `tools/release_notes.sh` prints it and `tools/dist.sh` refuses to package a version that has none. The version lives in `VERSION`; the app, `PARAM.SFO`, the package art and the file names (`hometidy_ps3_v<version>.pkg`) all read it, and the tag is `v<version>`.
 
+## v1.0.3
+- Tomb Raider is ordered by release date: Tomb Raider, II, III, The Last Revelation, Chronicles, then The Angel of Darkness, Legend, Anniversary, Underworld and Trilogy. Before, The Last Revelation (1999) came before II (1997) and III (1998): a title with no number in its name was treated as an unlisted title and went ahead of the numbered ones.
+- The same defect in two more series of the PS1 list is fixed: Spyro (Spyro the Dragon, Spyro 2, Year of the Dragon, which came last-to-first) and Mortal Kombat (Trilogy, 1996, before Mythologies: Sub-Zero, 1997).
+- Not run on a console in the release checks: the host tests, the package build and a run of the sorter on the real game list of the owner pass.
+
 ## v1.0.2
 - Final Fantasy Tactics (the PS1 game) is no longer ordered with the numbered Final Fantasy games by release date. It is a title of its own and follows the alphabetical order of the series names: it now sits right after Final Fantasy XIV instead of between VII and VIII.
 - The release files are named `hometidy_ps3_v<version>.pkg` and `.self` (for example `hometidy_ps3_v1.0.2.pkg`) instead of `HomeTidy.pkg`.
