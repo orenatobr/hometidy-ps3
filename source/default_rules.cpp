@@ -66,7 +66,7 @@ puppeteer                       | puppeteer | 2013-09
 playstation all stars           | playstation all stars | 2012-11
 # --- Square Enix and JRPG
 dirge of cerberus               | dirge of cerberus | 2006-08
-final fantasy tactics           | final fantasy | 1998-01
+final fantasy tactics           | final fantasy tactics | 1998-01  # not a numbered Final Fantasy: its own title
 final fantasy vii               | final fantasy | 1997-09
 final fantasy viii              | final fantasy | 1999-09
 final fantasy ix                | final fantasy | 2000-11
