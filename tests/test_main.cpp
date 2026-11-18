@@ -109,6 +109,19 @@ static void testSeriesOrder() {
     CHECK_EQ(sorter::makeKey("God of War", user).series, std::string("zzz"));
 }
 
+// Final Fantasy Tactics is not a numbered Final Fantasy: it is a title of its own, so the alphabetical order of the
+// series names places it, not the release dates of Final Fantasy VII to XIV.
+static void testFinalFantasyTactics() {
+    using V = std::vector<std::string>;
+    const auto r = rules();
+    CHECK_EQ(sorter::makeKey("Final Fantasy Tactics (USA)", r).series, std::string("final fantasy tactics"));
+    CHECK_EQ(sorter::makeKey("Final Fantasy VII (USA) (Disc 1)", r).series, std::string("final fantasy"));
+    CHECK_EQ(sortTitles({"Final Fantasy Tactics (USA)", "Final Fantasy XIV (USA)", "Final Fantasy VIII (USA) (Disc 1)",
+                         "Final Fantasy IX (USA) (Disc 1)", "Final Fantasy VII (USA) (Disc 1)", "Final Fantasy X (USA)", "Folklore (USA)"}),
+             (V{"Final Fantasy VII (USA) (Disc 1)", "Final Fantasy VIII (USA) (Disc 1)", "Final Fantasy IX (USA) (Disc 1)",
+                "Final Fantasy X (USA)", "Final Fantasy XIV (USA)", "Final Fantasy Tactics (USA)", "Folklore (USA)"}));
+}
+
 // The list shown by the user's console: the new order must be the expected one.
 static void testUserLibrary() {
     const std::vector<std::string> shelf = {
@@ -689,6 +702,7 @@ int main() {
     testCleanTitle();
     testRules();
     testSeriesOrder();
+    testFinalFantasyTactics();
     testUserLibrary();
     testBalanced();
     testMygames();

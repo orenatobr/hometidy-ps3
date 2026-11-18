@@ -11,9 +11,9 @@ It runs on the console, with the controller. No computer needed. There is a sibl
 
 ## Install
 
-1. Download `HomeTidy.pkg` from the [latest release](../../releases/latest).
+1. Download `hometidy_ps3_v<version>.pkg` (for example `hometidy_ps3_v1.0.2.pkg`) from the [latest release](../../releases/latest). What changed is in the release notes and in [CHANGELOG.md](CHANGELOG.md).
 2. Copy it to a USB drive (or to `/dev_hdd0/packages` over FTP) and install it from the XMB: **Game > Package Manager > Install Package Files** (or **Game > Install Package Files**, depending on your firmware).
-3. Start **HomeTidy** from the Game column. You can also run `HomeTidy.self` from a file manager such as multiMAN.
+3. Start **HomeTidy** from the Game column. You can also run `hometidy_ps3_v<version>.self` from a file manager such as multiMAN.
 
 Needs a console with custom firmware and webMAN MOD (written for the setup of the author: Evilnat 4.92.x). The language follows the console (Portuguese or English). Press **Square** on the first screen to switch.
 
@@ -58,13 +58,15 @@ To undo a sort, copy a backup over `mygames.xml` (FTP is enough).
 
 ## Build
 
-You need the [ps3dev](https://github.com/ps3dev/ps3dev) toolchain (the prebuilt release for macOS or Linux is fine) and nothing else: the image and font code is vendored under `third_party/`.
+You need the [ps3dev](https://github.com/ps3dev/ps3dev) toolchain (the prebuilt release for macOS or Linux is fine) and Python 3 with Pillow, which draws the package icon and background with the version in them. The image and font code is vendored under `third_party/`.
+
+The version is in the `VERSION` file (`1.0.2`) and nowhere else: the app, `PARAM.SFO`, the package art and the names of the release files are made from it. To release: put the new version in `VERSION` and its notes in a `## v<version>` section at the top of `CHANGELOG.md`, build, run `tools/dist.sh`, then `gh release create v<version> dist/* --target main --latest --title v<version> --notes-file <(tools/release_notes.sh)`.
 
 ```sh
 export PS3DEV=$HOME/ps3dev/ps3dev PSL1GHT=$HOME/ps3dev/ps3dev
 export PATH=$PATH:$PS3DEV/bin:$PS3DEV/ppu/bin
 make pkg          # HomeTidy.self, HomeTidy.pkg and HomeTidy.gnpdrm.pkg
-tools/dist.sh     # dist/HomeTidy.pkg (the finalized package), dist/HomeTidy.self, SHA256SUMS
+tools/dist.sh     # dist/hometidy_ps3_v<version>.pkg (the finalized package), .self and SHA256SUMS
 ```
 
 Build from a normal (APFS/ext4) folder, not from an exFAT card: macOS writes `._*` files there and breaks the build.
@@ -95,6 +97,7 @@ tools/host_preview.sh /tmp/fake_console /tmp/shots   # needs Python 3 with Pillo
 | `source/gfx.*`, `app.*`, `texts.*` | Software canvas, screens, English and Portuguese texts. |
 | `source/platform_ps3.*`, `main.cpp` | Console only: RSX frame buffer, controllers, system events. |
 | `host/` | Desktop preview and platform layer for the tests. |
+| `VERSION`, `CHANGELOG.md`, `tools/` | The release version, the notes of each release, and the scripts that prepare the package (`prepare.sh`, `make_art.py`), pack the release files (`dist.sh`) and print the notes (`release_notes.sh`). |
 
 ## Credits
 
