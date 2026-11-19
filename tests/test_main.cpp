@@ -774,9 +774,11 @@ static void testFrame() {
 class FakeClient : public http::Client {
 public:
     struct Route {
-        int status = 200;
+        Route(int s = 200, Bytes b = {}, bool f = false) : status(s), body(std::move(b)), fail(f) {}
+        int status;
         Bytes body;
-        bool fail = false;
+        bool fail;
+        std::map<std::string, std::string> headers;  ///< Lowercase names, for a HEAD.
     };
     std::map<std::string, Route> routes;
     std::vector<std::string> requested;
@@ -784,14 +786,33 @@ public:
 
     void start(const std::string& url, std::size_t maxBytes) override {
         requested.push_back(url);
+        head_ = false;
         max_ = maxBytes;
         steps_ = 0;
         current_ = routes.find(url);
         // an address with no route answers 404, like a file that does not exist
         state_ = current_ != routes.end() && current_->second.fail ? http::State::Failed : http::State::Running;
     }
+    void startHead(const std::string& url) override {
+        requested.push_back("HEAD " + url);
+        steps_ = 0;
+        max_ = 1024;
+        current_ = routes.find(url);
+        state_ = current_ != routes.end() && current_->second.fail ? http::State::Failed : http::State::Running;
+        head_ = true;
+    }
+    std::string header(const std::string& name) const override {
+        if (current_ == routes.end()) return "";
+        const auto it = current_->second.headers.find(name);
+        return it == current_->second.headers.end() ? "" : it->second;
+    }
     http::State step() override {
         if (state_ != http::State::Running) return state_;
+        if (head_ && ++steps_ >= 1) {
+            head_ = false;
+            state_ = http::State::Done;
+            return state_;
+        }
         if (++steps_ >= 3) {
             state_ = current_ != routes.end() && current_->second.body.size() > max_ ? http::State::Failed : http::State::Done;
         }
@@ -813,6 +834,7 @@ private:
     std::map<std::string, Route>::iterator current_ = routes.end();
     std::size_t max_ = 0;
     int steps_ = 0;
+    bool head_ = false;
     http::State state_ = http::State::Idle;
 };
 
@@ -889,8 +911,13 @@ static void testCoverSync() {
     fake.routes[covers::imageUrl(s3, "Different (USA)")] = ok(big2);
     fake.routes[covers::imageUrl(s3, "Finished (USA)")] = ok(big);
     fake.routes[covers::imageUrl(s3, "Tiered Game (USA)")] = ok(big2);
-    fake.routes[covers::gametdbUrl("BLUS99999", "US")] = ok(gtdb);
-    fake.routes[covers::gametdbUrl("BLES11111", "EN")] = ok(gtdb);  // the US folder has no route: 404, then the next region
+    auto withEtag = [&](const std::string& etag) {
+        FakeClient::Route r = ok(gtdb);
+        r.headers = {{"etag", etag}, {"content-length", std::to_string(gtdb.size())}};
+        return r;
+    };
+    fake.routes[covers::gametdbUrl("BLUS99999", "US")] = withEtag("\"v1\"");
+    fake.routes[covers::gametdbUrl("BLES11111", "EN")] = withEtag("\"e1\"");  // the US folder has no route: 404, then the next region
     fake.routes[covers::treeUrl(s2, "master")] = okText(kRootTree);
     fake.routes[covers::treeUrl(s2, "boxtree")] =
         okText(folderTree({{"Jpg Game (USA).png", sha1::gitBlob(big)}, {"Corrupt (USA).png", sha1::gitBlob(big)},
@@ -962,10 +989,12 @@ static void testCoverSync() {
     CHECK_EQ(c2.failed, 1);   // Corrupt, still
     CHECK_EQ(c2.missing, 1);
     CHECK_EQ(c2.same, 9);
-    // no image is fetched again; a link is read again (a few bytes) to know what it points to
+    // nothing is downloaded again: only the cover lists and HEAD requests to the fallback server (Corrupt never
+    // matched, so it is asked again, and it is the only image address that appears)
     for (const std::string& url : fake.requested) {
-        CHECK(url.find("raw.githubusercontent.com") == std::string::npos || url.find("Corrupt") != std::string::npos ||
-              url.find("Linked") != std::string::npos);
+        const bool list = url.find("api.github.com") != std::string::npos;
+        const bool head = url.compare(0, 5, "HEAD ") == 0;
+        CHECK(list || head || url.find("Corrupt") != std::string::npos);
     }
 
     // a cover changed afterwards (the completed mark drawn again) no longer matches what was written: overwritten
@@ -989,6 +1018,43 @@ static void testCoverSync() {
     coversync::Sync fourth(fake, gamesNow(), db);
     runSync(fourth);
     CHECK_EQ(fourth.progress().counts.replaced, 1);
+
+    // the fallback server's image changed (new ETag): fetched again; unchanged ones are not
+    fake.routes[covers::gametdbUrl("BLUS99999", "US")] = withEtag("\"v2\"");
+    fake.requested.clear();
+    coversync::Sync fifth(fake, gamesNow(), db);
+    runSync(fifth);
+    CHECK_EQ(fifth.progress().counts.replaced, 0);   // the same bytes came back: the file is already this one
+    CHECK(std::count(fake.requested.begin(), fake.requested.end(), covers::gametdbUrl("BLUS99999", "US")) == 1);
+    CHECK(std::count(fake.requested.begin(), fake.requested.end(), covers::gametdbUrl("BLES11111", "EN")) == 0);
+    CHECK_EQ(fifth.progress().counts.fallback, 0);
+}
+
+static void testCoverSyncSkipsWhatIsHere() {
+    const std::string root = tempDir("syncskip");
+    const std::string dir = root + "/PS2ISO";
+    fsx::makeDirs(dir);
+    const covers::Source& s2 = covers::sourceFor(library::Platform::Ps2);
+    const Bytes real = imageBytes(500, 700);
+    // v1.1.0 left the repository image as it is on disk: the same bytes as the remote
+    fsx::writeBytes(dir + "/Raw Copy (USA).iso", {});
+    fsx::writeBytes(dir + "/Raw Copy (USA).png", real);
+    FakeClient fake;
+    fake.routes[covers::treeUrl(s2, "master")] = {200, bytesOf(kRootTree), false};
+    fake.routes[covers::treeUrl(s2, "boxtree")] = {200, bytesOf(folderTree({{"Raw Copy (USA).png", sha1::gitBlob(real)}})), false};
+    // no route for the image itself: a download would be a 404 and a failure
+    coversync::Sync sync(fake, {gameAt(dir, "Raw Copy (USA)", library::Platform::Ps2)}, root + "/covers.db");
+    runSync(sync);
+    CHECK_EQ(sync.progress().counts.failed, 0);
+    CHECK_EQ(sync.progress().counts.replaced, 1);    // shrunk in place
+    CHECK_EQ(fake.requested.size(), std::size_t(2));  // the two lists, no image
+    CHECK(framed(dir + "/Raw Copy (USA).png"));
+    // and the next run knows it is current
+    fake.requested.clear();
+    coversync::Sync again(fake, {gameAt(dir, "Raw Copy (USA)", library::Platform::Ps2)}, root + "/covers.db");
+    runSync(again);
+    CHECK_EQ(again.progress().counts.same, 1);
+    CHECK_EQ(fake.requested.size(), std::size_t(2));
 }
 
 static void testCoverSyncFailures() {
@@ -1324,6 +1390,7 @@ int main() {
     testIsoInfo();
     testFrame();
     testCoverSync();
+    testCoverSyncSkipsWhatIsHere();
     testCoverSyncFailures();
     testGfx();
     testApp();

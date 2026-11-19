@@ -2,6 +2,9 @@
 
 #include <curl/curl.h>
 
+#include <cctype>
+#include <map>
+
 namespace http {
 namespace {
 
@@ -17,8 +20,12 @@ public:
         curl_global_cleanup();
     }
 
-    void start(const std::string& url, std::size_t maxBytes) override {
+    void start(const std::string& url, std::size_t maxBytes) override { begin(url, maxBytes, false); }
+    void startHead(const std::string& url) override { begin(url, 1024, true); }
+
+    void begin(const std::string& url, std::size_t maxBytes, bool headOnly) {
         drop();
+        headers_seen_.clear();
         body_.clear();
         max_ = maxBytes;
         prog_ = {};
@@ -46,6 +53,9 @@ public:
         curl_easy_setopt(easy_, CURLOPT_LOW_SPEED_LIMIT, 1L);  // give up when nothing arrives for 30 s
         curl_easy_setopt(easy_, CURLOPT_LOW_SPEED_TIME, 30L);
         curl_easy_setopt(easy_, CURLOPT_NOSIGNAL, 1L);
+        if (headOnly) curl_easy_setopt(easy_, CURLOPT_NOBODY, 1L);
+        curl_easy_setopt(easy_, CURLOPT_HEADERFUNCTION, &CurlClient::onHeader);
+        curl_easy_setopt(easy_, CURLOPT_HEADERDATA, this);
         headers_ = curl_slist_append(nullptr, "Accept: application/vnd.github+json");
         curl_easy_setopt(easy_, CURLOPT_HTTPHEADER, headers_);
         if (curl_multi_add_handle(multi_, easy_) != CURLM_OK) return fail("could not start the transfer");
@@ -73,6 +83,10 @@ public:
 
     Progress progress() const override { return prog_; }
     int status() const override { return status_; }
+    std::string header(const std::string& name) const override {
+        const auto it = headers_seen_.find(name);
+        return it == headers_seen_.end() ? "" : it->second;
+    }
     std::string error() const override { return error_; }
     std::vector<std::uint8_t> take() override { return std::move(body_); }
     void cancel() override {
@@ -90,6 +104,23 @@ private:
         }
         c->body_.insert(c->body_.end(), reinterpret_cast<std::uint8_t*>(data), reinterpret_cast<std::uint8_t*>(data) + bytes);
         return bytes;
+    }
+    // Keeps the headers of the last response (a redirect starts over at its next status line).
+    static size_t onHeader(char* data, size_t size, size_t n, void* self) {
+        auto* c = static_cast<CurlClient*>(self);
+        const std::string line(data, size * n);
+        if (line.compare(0, 5, "HTTP/") == 0) {
+            c->headers_seen_.clear();
+            return size * n;
+        }
+        const auto colon = line.find(':');
+        if (colon == std::string::npos) return size * n;
+        std::string key = line.substr(0, colon), value = line.substr(colon + 1);
+        for (char& ch : key) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+        while (!value.empty() && (value.front() == ' ' || value.front() == '\t')) value.erase(value.begin());
+        while (!value.empty() && (value.back() == '\r' || value.back() == '\n' || value.back() == ' ')) value.pop_back();
+        c->headers_seen_[key] = value;
+        return size * n;
     }
     static int onProgress(void* self, curl_off_t dltotal, curl_off_t dlnow, curl_off_t, curl_off_t) {
         auto* c = static_cast<CurlClient*>(self);
@@ -125,6 +156,7 @@ private:
     Progress prog_;
     int status_ = 0;
     std::string error_;
+    std::map<std::string, std::string> headers_seen_;
 };
 
 }  // namespace

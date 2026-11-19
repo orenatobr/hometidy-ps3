@@ -28,6 +28,9 @@ public:
     /// Starts a GET. `maxBytes` caps the body (the transfer fails when the server sends more).
     virtual void start(const std::string& url, std::size_t maxBytes) = 0;
 
+    /// Starts a HEAD: the status and headers of an address without its body (a few hundred bytes).
+    virtual void startHead(const std::string& url) = 0;
+
     /// Advances the transfer without blocking and returns the state.
     virtual State step() = 0;
 
@@ -35,6 +38,9 @@ public:
 
     /// HTTP status of a Done transfer (200, 404, 403...).
     virtual int status() const = 0;
+
+    /// A response header of a Done transfer, by lowercase name ("etag", "content-length"); empty when absent.
+    virtual std::string header(const std::string& name) const = 0;
 
     /// Why a transfer is Failed.
     virtual std::string error() const = 0;

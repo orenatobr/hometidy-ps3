@@ -41,6 +41,8 @@ namespace {
 class OfflineClient : public http::Client {
 public:
     void start(const std::string&, std::size_t) override { failed_ = true; }
+    void startHead(const std::string&) override { failed_ = true; }
+    std::string header(const std::string&) const override { return ""; }
     http::State step() override { return failed_ ? http::State::Failed : http::State::Idle; }
     http::Progress progress() const override { return {}; }
     int status() const override { return 0; }
@@ -94,6 +96,14 @@ public:
         }
         state_ = http::State::Running;
     }
+    void startHead(const std::string&) override {
+        steps_ = 0;
+        need_ = 1;
+        total_ = 0;
+        body_.clear();
+        state_ = http::State::Running;
+    }
+    std::string header(const std::string&) const override { return ""; }
     http::State step() override {
         if (state_ == http::State::Running && ++steps_ >= need_) state_ = http::State::Done;
         return state_;

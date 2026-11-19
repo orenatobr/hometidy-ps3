@@ -73,7 +73,7 @@ public:
     const Progress& progress() const { return progress_; }
 
 private:
-    enum class Stage { Next, RootTree, FolderTree, Game, Link, Download, Fallback, End };
+    enum class Stage { Next, RootTree, FolderTree, Game, Link, Download, FallbackHead, Fallback, End };
     struct Written {
         std::string remote;  ///< Repository blob id the local cover was made from.
         std::string local;   ///< Blob id of the local file as written.
@@ -86,7 +86,9 @@ private:
     void startDownload(const covers::Remote& remote);
     void pollLink();
     void pollDownload();
+    void pollFallbackHead();
     void pollFallback();
+    void useLocalAsSource();
     void startFallback();
     void afterFallbackMiss();
     void store(const std::vector<std::uint8_t>& framed, const std::string& remoteSha, bool fromFallback);
@@ -103,6 +105,7 @@ private:
     std::vector<library::Game> games_;
     std::string dbPath_;
     std::map<std::string, Written> db_;
+    std::map<std::string, std::string> links_;  ///< Link blob id -> the image it points to (a blob id fixes its content).
     std::vector<library::Platform> platforms_;
     std::size_t platformPos_ = 0;
     Stage stage_ = Stage::Next;
@@ -121,6 +124,7 @@ private:
     std::string titleId_;          ///< PS3 title id for the fallback server.
     std::vector<std::string> regions_;
     std::size_t regionPos_ = 0;
+    std::string validator_;        ///< What the fallback server says identifies the image now (ETag and size).
 };
 
 }  // namespace coversync
