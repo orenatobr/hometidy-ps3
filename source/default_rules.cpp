@@ -280,6 +280,11 @@ prince of persia the sands of time | prince of persia | 2003-11
 prince of persia trilogy        | prince of persia | 2010-12
 prince of persia classic trilogy | prince of persia | 2010-12
 prince of persia                | prince of persia | 2008-12
+crash bash                      | crash bandicoot | 2000-12
+crash bandicoot warped          | crash bandicoot | 1998-10
+crash bandicoot 3               | crash bandicoot | 1998-10
+crash bandicoot 2               | crash bandicoot | 1997-11
+crash bandicoot                 | crash bandicoot | 1996-09
 spyro year of the dragon        | spyro | 2000-10
 spyro 2                         | spyro | 1999-11
 spyro the dragon                | spyro | 1998-09

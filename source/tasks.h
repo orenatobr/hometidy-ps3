@@ -2,6 +2,7 @@
 // file paths so they run the same on the console and on the host.
 #pragma once
 
+#include <functional>
 #include <optional>
 #include <string>
 #include <vector>
@@ -72,6 +73,23 @@ std::optional<SortPlan> planSort(const std::string& xml, const std::vector<sorte
 ///     backupDir: Directory for the timestamped backup copy.
 ///     stamp: Text used in the backup name (e.g. "20261110_201500").
 Result applySort(const std::string& path, const SortPlan& plan, const std::string& backupDir, const std::string& stamp);
+
+/// Result of planning the icon links; nothing is written yet.
+struct IconPlan {
+    std::string original;
+    std::string fixed;
+    int changed = 0;  ///< Icons linked.
+};
+
+/// Finds the games whose icon is webMAN's placeholder although a cover exists next to the game image
+/// (see mygames::relinkIcons).
+///
+/// Returns:
+///     The plan, or nothing when no icon changes or the text is not a game list this app understands.
+std::optional<IconPlan> planIcons(const std::string& xml, const std::function<std::string(const std::string&)>& coverOf);
+
+/// Writes planned icon links with the same care as a sort: re-checks the file, saves a backup, writes, reads back.
+Result applyIcons(const std::string& path, const IconPlan& plan, const std::string& backupDir, const std::string& stamp);
 
 /// True when `path` currently holds exactly `expected` (used for the delayed re-check).
 bool fileEquals(const std::string& path, const std::string& expected);

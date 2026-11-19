@@ -65,6 +65,7 @@ private:
     void updateCovers(const platform::Input& in);
     void drawCovers();
     void startCovers();
+    void linkIcons();
     void drawBar(int x, int y, int w, double fraction, bool unknown);
     void drawMessage();
     // shared pieces
@@ -116,6 +117,8 @@ private:
     // covers
     std::unique_ptr<http::Client> http_;
     std::unique_ptr<coversync::Sync> sync_;
+    int iconsLinked_ = 0;          ///< Game list icons linked after the last cover update.
+    bool iconsFailed_ = false;     ///< The game list could not be updated.
     // message / toast
     std::string msgTitle_, msgBody_;
     gfx::Color msgColor_ = gfx::theme::red;

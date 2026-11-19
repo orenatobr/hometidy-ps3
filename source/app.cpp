@@ -597,6 +597,26 @@ void App::enterCovers() {
     screen_ = Screen::Covers;
 }
 
+// webMAN keeps the placeholder icon of a game that had no cover when it built the list. Link the covers that exist now.
+void App::linkIcons() {
+    iconsLinked_ = 0;
+    iconsFailed_ = false;
+    std::string xml;
+    if (!fsx::readFile(env_.xmlPath, xml)) return;
+    const auto coverOf = [](const std::string& base) -> std::string {
+        for (const char* ext : {".png", ".jpg", ".jpeg"}) {
+            if (fsx::exists(base + ext)) return base + ext;
+        }
+        return "";
+    };
+    const auto plan = tasks::planIcons(xml, coverOf);
+    if (!plan) return;
+    const tasks::Result r = tasks::applyIcons(env_.xmlPath, *plan, env_.appDir + "/backup", platform::timestamp());
+    iconsFailed_ = r.status != tasks::Status::Ok;
+    if (!iconsFailed_) iconsLinked_ = plan->changed;
+    platform::log("icons: linked=%d status=%d", plan->changed, static_cast<int>(r.status));
+}
+
 void App::startCovers() {
     if (!http_) http_ = platform::makeHttp(env_);
     sync_ = std::make_unique<coversync::Sync>(*http_, games_, env_.appDir + "/covers.db");
@@ -623,6 +643,7 @@ void App::updateCovers(const platform::Input& in) {
                           p.lastError.c_str());
             covers_.clear();  // new images on disk
             scanGames();
+            linkIcons();
         }
         return;
     }
@@ -698,7 +719,12 @@ void App::drawCovers() {
         const bool bad = rows[i].first == Id::CvFailed && rows[i].second > 0;
         c_.text(fmt(tr(rows[i].first).c_str(), rows[i].second), Size::Body, bad ? col::red : col::muted, cx, cy, Align::Left, bw / 2 - 20);
     }
-    if (p.indexErrors > 0 || (p.counts.failed > 0 && !p.lastError.empty())) {
+    if (done && iconsLinked_ > 0) {
+        c_.text(fmt(tr(Id::CvLinked).c_str(), iconsLinked_), Size::Body, col::green, x + 40, y + 380, Align::Left, bw);
+        c_.text(tr(Id::CoversLinkedHint), Size::Small, col::muted, x + 40, y + 416, Align::Left, bw);
+    } else if (done && iconsFailed_) {
+        c_.text(tr(Id::FailTitle), Size::Body, col::amber, x + 40, y + 380, Align::Left, bw);
+    } else if (p.indexErrors > 0 || (p.counts.failed > 0 && !p.lastError.empty())) {
         c_.text(p.lastError, Size::Small, col::amber, x + 40, y + 396, Align::Left, bw);
         c_.text(tr(Id::CoversNetHint), Size::Small, col::muted, x + 40, y + 428, Align::Left, bw);
     }

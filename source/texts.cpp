@@ -76,6 +76,8 @@ const char* const kRows[] = {
     "%d without a cover online",
     "%d failed",
     "Check the network connection and the console date and time (secure connections need both).",
+    "%d icons linked in the game list",
+    "webMAN showed its default icon for these games. Close this app and open the game column again to see the covers.",
 };
 
 static_assert(sizeof(kRows) / sizeof(kRows[0]) == static_cast<int>(Id::Count_), "string table out of sync");
