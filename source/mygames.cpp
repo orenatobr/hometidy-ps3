@@ -1,6 +1,8 @@
 #include "mygames.h"
 
 #include <algorithm>
+#include <cctype>
+#include <cstdlib>
 #include <map>
 #include <set>
 
@@ -209,6 +211,62 @@ std::optional<std::string> List::reorderedAll(const std::vector<std::vector<std:
     }
     out.append(text_, cursor, std::string::npos);
     if (!balanced(out)) return std::nullopt;
+    return out;
+}
+
+std::string relinkIcons(const std::string& text, const std::function<std::string(const std::string&)>& coverOf, int* changed) {
+    static const std::string kAction = "<P key=\"module_action\"><>", kIcon = "<P key=\"icon\"><>", kEnd = "</>";
+    auto urlDecode = [](const std::string& in) {
+        std::string out;
+        for (std::size_t i = 0; i < in.size(); ++i) {
+            if (in[i] == '+') {
+                out.push_back(' ');
+            } else if (in[i] == '%' && i + 2 < in.size() && std::isxdigit(static_cast<unsigned char>(in[i + 1])) &&
+                       std::isxdigit(static_cast<unsigned char>(in[i + 2]))) {
+                out.push_back(static_cast<char>(std::strtol(in.substr(i + 1, 2).c_str(), nullptr, 16)));
+                i += 2;
+            } else {
+                out.push_back(in[i]);
+            }
+        }
+        return out;
+    };
+    std::string out;
+    int count = 0;
+    std::size_t pos = 0;
+    while (true) {
+        const auto t = text.find("<T key=\"", pos);
+        if (t == std::string::npos) break;
+        const auto close = text.find("</T>", t);
+        if (close == std::string::npos) break;
+        out.append(text, pos, t - pos);
+        std::string block = text.substr(t, close - t);
+        const auto act = block.find(kAction);
+        const auto ic = block.find(kIcon);
+        if (act != std::string::npos && ic != std::string::npos) {
+            const auto aStart = act + kAction.size(), aEnd = block.find(kEnd, aStart);
+            const auto iStart = ic + kIcon.size(), iEnd = block.find(kEnd, iStart);
+            if (aEnd != std::string::npos && iEnd != std::string::npos &&
+                block.substr(iStart, iEnd - iStart).find("/wm_icons/") != std::string::npos) {
+                std::string base = urlDecode(block.substr(aStart, aEnd - aStart));
+                const auto dev = base.find("/dev_");
+                if (dev != std::string::npos) {
+                    base = base.substr(dev);
+                    const auto dot = base.rfind('.');
+                    if (dot != std::string::npos && dot > base.rfind('/')) base.resize(dot);
+                    const std::string cover = coverOf(base);
+                    if (!cover.empty()) {
+                        block.replace(iStart, iEnd - iStart, cover);
+                        ++count;
+                    }
+                }
+            }
+        }
+        out += block;
+        pos = close;
+    }
+    out.append(text, pos, std::string::npos);
+    if (changed) *changed = count;
     return out;
 }
 

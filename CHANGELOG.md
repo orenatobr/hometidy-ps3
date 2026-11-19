@@ -2,6 +2,11 @@
 
 Every release lists what changed here, newest first. The section of a version is its release notes: `tools/release_notes.sh` prints it and `tools/dist.sh` refuses to package a version that has none. The version lives in `VERSION`; the app, `PARAM.SFO`, the package art and the file names (`hometidy_ps3_v<version>.pkg`) all read it, and the tag is `v<version>`.
 
+## v1.2.2
+- Crash Bandicoot order: *Crash Bandicoot: Warped* came before *Crash Bandicoot 2*. The name has no number, so it was treated as an unlisted title and went ahead of the numbered ones (the same defect as Spyro and Tomb Raider). The series now has dated rules: Crash Bandicoot (1996), 2 (1997), Warped / 3 (1998) and Crash Bash (2000). Crash Team Racing keeps its place after them.
+- The cover of Warped was downloaded but webMAN showed its default icon. Cause found by reading the game list on the console: webMAN writes a placeholder icon (`/dev_hdd0/tmp/wm_icons/icon_wm_psx.png`) for a game that has no cover when it builds `mygames.xml`, and keeps it until the next rebuild. Warped was added to the console, webMAN built its entry, and only then the app downloaded the cover. After Update covers the app now checks the game list and links the cover (`<game name>.png`, `.jpg` or `.jpeg` next to the game image) into every entry that still has a placeholder icon. Only placeholder icons of games are changed; a backup of the list is saved first, the write is read back, and the order list is not touched. The summary screen says how many icons were linked. Close the app and open the game column again to see them.
+- Checked on the real game list of the console: exactly one icon (Warped) is relinked, and the Crash order comes out right. Not run on the console yet.
+
 ## v1.2.1
 Update covers no longer downloads what is already here.
 - PS3 covers from the fallback server (GameTDB) were fetched again on every run, only to compare them. The server lists no ids, so the app now sends a HEAD request (headers only, no image) and compares the ETag and size with the ones recorded when it wrote the cover. Same image on the server and same file here: nothing is downloaded. A changed ETag fetches the image again.

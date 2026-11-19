@@ -159,6 +159,23 @@ static void testPs1SequelsWithoutNumbers() {
 }
 
 // The list shown by the user's console: the new order must be the expected one.
+// Crash Bandicoot: "Warped" has no number in its name, so it jumped ahead of Crash Bandicoot 2 (the same defect as Spyro and Tomb Raider).
+static void testCrashBandicootOrder() {
+    using V = std::vector<std::string>;
+    const V byDate = {"Crash Bandicoot (USA)", "Crash Bandicoot 2 - Cortex Strikes Back (USA)", "Crash Bandicoot - Warped (USA)", "Crash Bash (USA)"};
+    V shuffled = byDate;
+    std::reverse(shuffled.begin(), shuffled.end());
+    CHECK_EQ(sortTitles(shuffled), byDate);
+    CHECK_EQ(sortTitles({"Crash Bandicoot - Warped (USA)", "Crash Bandicoot 2 - Cortex Strikes Back (USA)", "Crash Bandicoot (USA)"}),
+             (V{"Crash Bandicoot (USA)", "Crash Bandicoot 2 - Cortex Strikes Back (USA)", "Crash Bandicoot - Warped (USA)"}));
+    // the name some dumps use, and the names the console shows
+    CHECK_EQ(sortTitles({"Crash Bandicoot 3: Warped", "Crash Bandicoot 2: Cortex Strikes Back", "Crash Bandicoot"}),
+             (V{"Crash Bandicoot", "Crash Bandicoot 2: Cortex Strikes Back", "Crash Bandicoot 3: Warped"}));
+    // Crash Team Racing keeps its place after the platformers, as before
+    CHECK_EQ(sortTitles({"CTR - Crash Team Racing (USA)", "Crash Bandicoot - Warped (USA)", "Crash Bandicoot (USA)"}),
+             (V{"Crash Bandicoot (USA)", "Crash Bandicoot - Warped (USA)", "CTR - Crash Team Racing (USA)"}));
+}
+
 static void testUserLibrary() {
     const std::vector<std::string> shelf = {
         "Alpha Protocol (USA) (En,Fr,De,Es,It)", "Drakengard 3 (USA) (En,Fr)", "Enchanted Arms (USA)",
@@ -476,6 +493,70 @@ static void testSortTasks() {
     CHECK(again.has_value() && again->changedSegments == 0);
     if (again) CHECK(tasks::applySort(path, *again, dir + "/backup", "x").status == tasks::Status::NothingToDo);
     CHECK(!tasks::planSort("<X></X>", rules()).has_value());
+}
+
+// webMAN builds mygames.xml with the placeholder icon for a game that has no cover yet; a cover downloaded later is
+// never looked at until webMAN rebuilds the list. The app links it.
+static void testRelinkIcons() {
+    const std::string dir = tempDir("relink");
+    fsx::makeDirs(dir + "/PSXISO");
+    fsx::makeDirs(dir + "/PS3ISO");
+    auto entry = [&](const char* key, const std::string& icon, const std::string& action) {
+        return std::string("<T key=\"") + key + "\" include=\"inc\"><P key=\"icon\"><>" + icon + "</></P><P key=\"title\"><>t</></P><P key=\"module_action\"><>" +
+               action + "</></P><P key=\"info\"><>x</></P></T>";
+    };
+    const std::string placeholder = "/dev_hdd0/tmp/wm_icons/icon_wm_psx.png";
+    const std::string xml =
+        "<X><V id=\"seg_mygames\"><A><T key=\"wm_psx\"><P key=\"icon\"><>/dev_hdd0/tmp/wm_icons/icon_wm_album_psx.png</></P></T></A></V>"
+        "<V id=\"seg_wm_psx_items\"><A>" +
+        entry("0001", placeholder, "/mount_ps3/dev_hdd0/PSXISO/Crash+Bandicoot+-+Warped+(USA).bin") +     // cover exists: linked
+        entry("0002", placeholder, "/mount_ps3/dev_hdd0/PSXISO/No+Cover+(USA).bin") +                       // no cover: stays
+        entry("0003", dir + "/PSXISO/Other.png", "/mount_ps3/dev_hdd0/PSXISO/Other.bin") +                // real icon: stays
+        entry("0004", placeholder, "/mount_ps3/dev_hdd0/PSXISO/Spyro+2+-+Ripto%27s+Rage!+(USA).bin") +      // %27 decoded; jpg cover
+        entry("0005", "/dev_hdd0/tmp/wm_icons/icon_wm_ps3.png", "/mount_ps3/dev_hdd0/PS3ISO/Ratchet+%26+Clank+(USA).iso") +
+        "</A><I class=\"type:x-xmb/module-action\" key=\"0001\" attr=\"0001\"/></V></X>";
+    // the covers live where the paths point: the test maps /dev_hdd0 to the temp dir
+    auto coverOf = [&](const std::string& base) -> std::string {
+        const std::string local = dir + base.substr(std::string("/dev_hdd0").size());
+        for (const char* ext : {".png", ".jpg", ".jpeg"}) {
+            if (fsx::exists(local + ext)) return base + ext;
+        }
+        return "";
+    };
+    touch(dir + "/PSXISO/Crash Bandicoot - Warped (USA).png");
+    touch(dir + "/PSXISO/Spyro 2 - Ripto's Rage! (USA).jpg");
+    touch(dir + "/PS3ISO/Ratchet & Clank (USA).png");
+    int changed = 0;
+    const std::string out = mygames::relinkIcons(xml, coverOf, &changed);
+    CHECK_EQ(changed, 3);
+    CHECK(out.find("<P key=\"icon\"><>/dev_hdd0/PSXISO/Crash Bandicoot - Warped (USA).png</>") != std::string::npos);
+    CHECK(out.find("<P key=\"icon\"><>/dev_hdd0/PSXISO/Spyro 2 - Ripto's Rage! (USA).jpg</>") != std::string::npos);
+    CHECK(out.find("<P key=\"icon\"><>/dev_hdd0/PS3ISO/Ratchet & Clank (USA).png</>") != std::string::npos);
+    CHECK(out.find("icon_wm_psx.png</></P><P key=\"title\"><>t</></P><P key=\"module_action\"><>/mount_ps3/dev_hdd0/PSXISO/No+Cover") != std::string::npos);
+    CHECK(out.find(dir + "/PSXISO/Other.png</>") != std::string::npos);
+    // the platform header icon (not a game) is not touched, and the order list is as it was
+    CHECK(out.find("icon_wm_album_psx.png") != std::string::npos);
+    CHECK(out.find("<I class=\"type:x-xmb/module-action\" key=\"0001\" attr=\"0001\"/>") != std::string::npos);
+    CHECK(mygames::balanced(out));
+    // a list with nothing to link comes back as it was
+    int none = -1;
+    CHECK(mygames::relinkIcons(out, coverOf, &none) == out);
+    CHECK_EQ(none, 0);
+
+    // on the files: backup, write, read back; nothing to do when nothing changes
+    const std::string path = dir + "/mygames.xml";
+    touch(path, xml);
+    const auto plan = tasks::planIcons(xml, coverOf);
+    CHECK(plan.has_value() && plan->changed == 3);
+    const auto r = tasks::applyIcons(path, *plan, dir + "/backup", "20261119_150000");
+    CHECK(r.status == tasks::Status::Ok);
+    std::string now;
+    CHECK(fsx::readFile(path, now) && now == plan->fixed);
+    std::string bak;
+    CHECK(fsx::readFile(r.backupPath, bak) && bak == xml);
+    CHECK(!tasks::planIcons(now, coverOf).has_value());  // already linked
+    touch(path, "changed meanwhile");
+    CHECK(tasks::applyIcons(path, *plan, dir + "/backup", "20261119_150001").status == tasks::Status::Changed);
 }
 
 static void testCoverTasks() {
@@ -1377,6 +1458,7 @@ int main() {
     testFinalFantasyTactics();
     testTombRaiderOrder();
     testPs1SequelsWithoutNumbers();
+    testCrashBandicootOrder();
     testUserLibrary();
     testBalanced();
     testMygames();
@@ -1385,6 +1467,7 @@ int main() {
     testLibrary();
     testSortTasks();
     testCoverTasks();
+    testRelinkIcons();
     testSha1();
     testCoverIndex();
     testIsoInfo();

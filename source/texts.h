@@ -75,6 +75,8 @@ enum class Id {
     CvMissing,         // "%d not in the repository"
     CvFailed,          // "%d failed"
     CoversNetHint,
+    CvLinked,          // "%d icons linked in the game list"
+    CoversLinkedHint,
     Count_
 };
 

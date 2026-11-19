@@ -80,23 +80,43 @@ bool fileEquals(const std::string& path, const std::string& expected) {
     return fsx::readFile(path, now) && now == expected;
 }
 
-Result applySort(const std::string& path, const SortPlan& plan, const std::string& backupDir, const std::string& stamp) {
+// Re-checks the file, saves a backup of what is there, writes `updated`, reads it back.
+Result writeWithBackup(const std::string& path, const std::string& original, const std::string& updated, const std::string& backupDir,
+                       const std::string& stamp) {
     Result r;
-    if (plan.changedSegments == 0) return {Status::NothingToDo, "", false};
     std::string now;
     if (!fsx::readFile(path, now)) return {Status::ReadFailed, "", false};
-    if (now != plan.original) return {Status::Changed, "", false};
-    if (!mygames::balanced(plan.sorted)) return {Status::WriteFailed, "", false};
+    if (now != original) return {Status::Changed, "", false};
+    if (!mygames::balanced(updated)) return {Status::WriteFailed, "", false};
 
     fsx::makeDirs(backupDir);
     r.backupPath = backupDir + "/mygames_" + stamp + ".xml";
     if (!fsx::writeBytes(r.backupPath, bytesOf(now)) || !fileEquals(r.backupPath, now)) {
         return {Status::BackupFailed, "", false};
     }
-    if (!fsx::writeBytes(path, bytesOf(plan.sorted))) return {Status::WriteFailed, r.backupPath, false};
-    if (!fileEquals(path, plan.sorted)) return {Status::VerifyFailed, r.backupPath, false};
+    if (!fsx::writeBytes(path, bytesOf(updated))) return {Status::WriteFailed, r.backupPath, false};
+    if (!fileEquals(path, updated)) return {Status::VerifyFailed, r.backupPath, false};
     r.status = Status::Ok;
     return r;
+}
+
+Result applySort(const std::string& path, const SortPlan& plan, const std::string& backupDir, const std::string& stamp) {
+    if (plan.changedSegments == 0) return {Status::NothingToDo, "", false};
+    return writeWithBackup(path, plan.original, plan.sorted, backupDir, stamp);
+}
+
+std::optional<IconPlan> planIcons(const std::string& xml, const std::function<std::string(const std::string&)>& coverOf) {
+    if (!mygames::balanced(xml)) return std::nullopt;
+    IconPlan plan;
+    plan.original = xml;
+    plan.fixed = mygames::relinkIcons(xml, coverOf, &plan.changed);
+    if (plan.changed == 0) return std::nullopt;
+    return plan;
+}
+
+Result applyIcons(const std::string& path, const IconPlan& plan, const std::string& backupDir, const std::string& stamp) {
+    if (plan.changed == 0) return {Status::NothingToDo, "", false};
+    return writeWithBackup(path, plan.original, plan.fixed, backupDir, stamp);
 }
 
 std::string coverBackupPath(const std::string& coverPath, const std::string& backupDir) {

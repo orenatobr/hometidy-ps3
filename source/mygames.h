@@ -10,6 +10,7 @@
 #pragma once
 
 #include <cstddef>
+#include <functional>
 #include <optional>
 #include <string>
 #include <vector>
@@ -66,6 +67,24 @@ private:
     std::vector<Segment> segments_;
     std::vector<std::vector<Slot>> slots_;  ///< Parallel to segments_.
 };
+
+/// Links the cover of every game whose icon is webMAN's placeholder.
+///
+/// webMAN writes a placeholder icon (a path under `/wm_icons/`) for a game that has no cover when it builds the
+/// list, and keeps it until the next rebuild, so a cover added later is not shown. The game is found from its
+/// mount action (`/mount_ps3/dev_hdd0/PSXISO/Crash+Bandicoot+(USA).bin`: URL encoded, the file name without its
+/// extension is the cover name). An icon that is not a placeholder, a game without a cover and the platform
+/// headers are left as they are.
+///
+/// Args:
+///     text: Content of mygames.xml.
+///     coverOf: Gets the path of the game without extension ("/dev_hdd0/PSXISO/Crash Bandicoot (USA)") and returns
+///         the cover path, or empty when there is none.
+///     changed: Receives how many icons were linked.
+///
+/// Returns:
+///     The new text.
+std::string relinkIcons(const std::string& text, const std::function<std::string(const std::string&)>& coverOf, int* changed = nullptr);
 
 /// True when every `<tag>` has its `</tag>` (the file uses `<>` ... `</>` pairs as well).
 bool balanced(const std::string& text);
