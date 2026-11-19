@@ -46,9 +46,7 @@ private:
 
     // lifecycle
     void load();
-    void loadConfig();
     void scanGames();
-    void saveConfig();
     // screens: update + draw
     void updateHome(const platform::Input& in);
     void drawHome();

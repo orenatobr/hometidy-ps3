@@ -1,9 +1,7 @@
-// UI texts in English and Brazilian Portuguese.
+// UI texts (US English).
 #pragma once
 
 namespace strings {
-
-enum class Lang { En, Pt };
 
 enum class Id {
     AppTagline,
@@ -18,7 +16,6 @@ enum class Id {
     HintSelect,
     HintBack,
     HintExit,
-    HintLanguage,
     HintApply,
     HintPlatform,
     HintScroll,
@@ -67,24 +64,21 @@ enum class Id {
     HintStart,
     HintStop,
     CoversReading,     // "Reading the cover list of %s..."
+    CoversChecking,    // "Checking %s"
+    CvFallback,        // "%d from the fallback server"
     CoversOverall,     // "%d of %d games"
     CoversDone,
     CoversStopped,
     CvAdded,           // "%d new"
     CvReplaced,        // "%d replaced"
     CvSame,            // "%d already up to date"
-    CvMarked,          // "%d kept (marked as completed)"
     CvMissing,         // "%d not in the repository"
     CvFailed,          // "%d failed"
     CoversNetHint,
     Count_
 };
 
-/// Current language.
-Lang current();
-void set(Lang lang);
-
-/// Text for the current language.
+/// Text of a UI string.
 const char* get(Id id);
 
 }  // namespace strings

@@ -195,9 +195,6 @@ Env init() {
 
     s32 value = 0;
     if (sysUtilGetSystemParamInt(SYSUTIL_SYSTEMPARAM_ID_ENTER_BUTTON_ASSIGN, &value) == 0) env.circleConfirms = value == 0;
-    if (sysUtilGetSystemParamInt(SYSUTIL_SYSTEMPARAM_ID_LANG, &value) == 0) {
-        env.systemPortuguese = value == SYSUTIL_LANG_PORTUGUESE_BR || value == SYSUTIL_LANG_PORTUGUESE_PT;
-    }
     g_circleConfirms = env.circleConfirms;
     g_appDir = env.appDir;
 

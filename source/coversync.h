@@ -1,8 +1,15 @@
 // Brings the cover images next to the game images up to date from the cover repositories (covers.h).
 //
-// For each game the cover of the repository is compared with the local one by git blob id. A missing
-// cover is downloaded; a different one is replaced; a cover marked as completed is kept, so the mark
-// is not lost. Every download is checked against the id the repository announced before it is written.
+// For each game the repository image is looked up by the game name; for a PS3 game the repository does not
+// have, the cover comes from the fallback server (GameTDB) by the title id read from the disc image. A
+// download is shrunk to the frame the game list uses (frame.h) and written over the local cover.
+//
+// What is compared is the git blob id the repository lists for the image against the one recorded when the
+// local cover was last written (a small database, since the local file is a shrunk copy and its own id is
+// not the repository's). A local cover that no longer matches what was written (another tool, a mark
+// drawn on it) or that was never written by this app counts as different and is overwritten, a cover
+// marked as completed included. Every download is checked against the announced id before it is used.
+//
 // The sync is a state machine: call step() once per frame and draw progress().
 #pragma once
 
@@ -19,6 +26,7 @@ namespace coversync {
 enum class Phase {
     Starting,
     ReadingIndex,  ///< Fetching the list of covers of a repository.
+    Checking,      ///< Comparing the cover of a game (nothing is transferred).
     Downloading,   ///< Fetching one image.
     Finished,
 };
@@ -27,16 +35,16 @@ struct Counts {
     int added = 0;     ///< No local cover: downloaded.
     int replaced = 0;  ///< Local cover differed: overwritten.
     int same = 0;      ///< Local cover already matched.
-    int marked = 0;    ///< Kept because it carries the completed mark.
-    int missing = 0;   ///< The repository has no cover for the game.
+    int missing = 0;   ///< Neither the repository nor the fallback server has a cover for the game.
     int failed = 0;    ///< Download or write failed.
+    int fallback = 0;  ///< Of added and replaced: covers that came from the fallback server.
 };
 
 /// What the screen needs to draw.
 struct Progress {
     Phase phase = Phase::Starting;
     library::Platform platform = library::Platform::Ps3;  ///< Repository being read or game being fetched.
-    std::string file;       ///< The image being downloaded ("<name>.png").
+    std::string file;       ///< The image being downloaded.
     int index = 0;          ///< Images handled so far (of `total`).
     int total = 0;          ///< Games to look at.
     long long bytes = 0;    ///< Of the current transfer.
@@ -51,8 +59,9 @@ class Sync {
 public:
     /// Args:
     ///     client: HTTP client; must outlive the sync.
-    ///     games: Games to look at (their `dir`, `name`, `image` and `platform` are used).
-    Sync(http::Client& client, std::vector<library::Game> games);
+    ///     games: Games to look at (their `dir`, `name`, `file`, `image` and `platform` are used).
+    ///     dbPath: Where the record of written covers is kept (empty: not kept).
+    Sync(http::Client& client, std::vector<library::Game> games, std::string dbPath = "");
 
     /// Advances the work a little. Cheap to call every frame.
     void step();
@@ -64,28 +73,54 @@ public:
     const Progress& progress() const { return progress_; }
 
 private:
-    enum class Stage { Next, RootTree, FolderTree, Game, Download, End };
+    enum class Stage { Next, RootTree, FolderTree, Game, Link, Download, Fallback, End };
+    struct Written {
+        std::string remote;  ///< Repository blob id the local cover was made from.
+        std::string local;   ///< Blob id of the local file as written.
+    };
 
     void nextPlatform();
     void pollIndex(bool folder);
     void nextGame();
+    void tryRemote(const covers::Remote& remote);
+    void startDownload(const covers::Remote& remote);
+    void pollLink();
     void pollDownload();
+    void pollFallback();
+    void startFallback();
+    void afterFallbackMiss();
+    void store(const std::vector<std::uint8_t>& framed, const std::string& remoteSha, bool fromFallback);
+    void buildQueue();
     void indexFailed(const std::string& why);
+    void failGame(const std::string& why);
     void finishGame();
+    void finish();
+    void loadDb();
+    void saveDb() const;
+    std::string readLocal() const;
 
     http::Client& client_;
     std::vector<library::Game> games_;
+    std::string dbPath_;
+    std::map<std::string, Written> db_;
     std::vector<library::Platform> platforms_;
     std::size_t platformPos_ = 0;
     Stage stage_ = Stage::Next;
     Progress progress_;
 
-    std::map<std::string, covers::Remote> index_;
+    covers::Index index_;
     std::vector<std::size_t> queue_;  ///< Games of the platform being worked on.
     std::size_t queuePos_ = 0;
-    std::string target_;     ///< File being written.
-    std::string expected_;   ///< Blob id of the image being fetched.
-    bool replacing_ = false;
+
+    // the game being worked on
+    const library::Game* game_ = nullptr;
+    std::string target_;           ///< File being written.
+    std::string localSha_;         ///< Blob id of the local cover now (empty when there is none).
+    covers::Remote remote_;        ///< Image of the repository being fetched.
+    int hops_ = 0;                 ///< Symbolic links followed for this game.
+    std::string titleId_;          ///< PS3 title id for the fallback server.
+    std::vector<std::string> regions_;
+    std::size_t regionPos_ = 0;
 };
 
 }  // namespace coversync

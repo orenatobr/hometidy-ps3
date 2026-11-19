@@ -17,6 +17,7 @@ struct Root {
 /// One game image and its cover.
 struct Game {
     std::string name;    ///< File name without extension, e.g. "Alpha Protocol (USA) (En,Fr)".
+    std::string file;    ///< File name of the game image, e.g. "Alpha Protocol (USA) (En,Fr).iso".
     std::string title;   ///< Name to show: tags removed, " - " turned into ": ".
     std::string image;   ///< Path of the .png/.jpg cover, empty when the game has none.
     std::string dir;     ///< Folder of the game image (and where its cover belongs).
