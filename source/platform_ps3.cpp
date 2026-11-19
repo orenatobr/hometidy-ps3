@@ -1,5 +1,6 @@
 // Console build of the platform layer (PSL1GHT): RSX frame buffer, controllers, system events, files.
 #include <malloc.h>
+#include <net/net.h>
 #include <ppu-types.h>
 #include <rsx/rsx.h>
 #include <stdarg.h>
@@ -13,7 +14,9 @@
 
 #include <io/pad.h>
 
+#include "cacert_bin.h"
 #include "fsx.h"
+#include "http_curl.h"
 #include "inter_bold_ttf.h"
 #include "inter_regular_ttf.h"
 #include "platform.h"
@@ -208,6 +211,16 @@ Env init() {
     fsx::renameFile(env.appDir + "/hometidy.log", env.appDir + "/hometidy.prev.log");
     g_log = fopen((env.appDir + "/hometidy.log").c_str(), "w");
     return env;
+}
+
+std::unique_ptr<http::Client> makeHttp(const Env& env) {
+    static bool netUp = false;
+    if (!netUp) netUp = netInitialize() == 0;
+    // curl 7.64 reads the trusted roots from a file: write the bundle that is built into the app.
+    const std::string ca = env.appDir + "/cacert.pem";
+    fsx::makeDirs(env.appDir);
+    if (!fsx::writeBytes(ca, std::vector<std::uint8_t>(cacert_bin, cacert_bin + cacert_bin_size))) log("could not write %s", ca.c_str());
+    return http::makeCurlClient(ca, std::string("HomeTidy-PS3/") + APP_VERSION);
 }
 
 void shutdown() {

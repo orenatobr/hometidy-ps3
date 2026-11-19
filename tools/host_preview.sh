@@ -8,6 +8,6 @@ python3 tools/make_fake_console.py "$FAKE"
 BIN="${TMPDIR:-/tmp}/hometidy_host"
 ${CXX:-c++} -std=c++20 -O2 -Wall -Wextra -DAPP_VERSION=\"$(cat VERSION)\" -Isource -Ithird_party/stb \
     host/main_host.cpp host/platform_host.cpp source/app.cpp source/gfx.cpp source/sorter.cpp source/default_rules.cpp \
-    source/mygames.cpp source/library.cpp source/badge.cpp source/tasks.cpp source/texts.cpp source/fsx.cpp source/stb_impl.cpp -o "$BIN"
+    source/mygames.cpp source/library.cpp source/sha1.cpp source/covers.cpp source/coversync.cpp source/badge.cpp source/tasks.cpp source/texts.cpp source/fsx.cpp source/stb_impl.cpp -o "$BIN"
 HOMETIDY_ROOT="$FAKE" HOMETIDY_SHOTS="$OUT" HOMETIDY_FONTS=data "$BIN" "$@"
 echo "screens in $OUT"

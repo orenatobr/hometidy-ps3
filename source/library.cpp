@@ -57,6 +57,7 @@ std::vector<Game> scan(const std::vector<Root>& roots) {
             g.name = name;
             g.title = sorter::prettyTitle(name);
             g.platform = root.platform;
+            g.dir = root.path;
             for (const std::string& stem : {name, file}) {
                 for (const char* ext : {".png", ".jpg", ".jpeg"}) {
                     const auto it = byLower.find(lower(stem + ext));

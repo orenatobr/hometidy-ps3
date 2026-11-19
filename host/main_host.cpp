@@ -83,6 +83,9 @@ int main(int argc, char** argv) {
         {key('r'), nullptr, 0},          {key('A'), "08_mark.png", 2},      {key('A'), "09_marked.png", 2},
         {key('A'), "10_unmarked.png", 2}, {key('R'), "11_mark_ps2.png", 2}, {key('d'), nullptr, 0},
         {key('r'), "12_mark_row2.png", 2}, {key('B'), nullptr, 0},          {key('Y'), "13_home_pt.png", 2},
+        {key('r'), nullptr, 0},          {key('A'), "14_covers_intro.png", 1}, {key('A'), nullptr, 0},
+        {{}, "15_covers_reading.png", 3}, {{}, "16_covers_downloading.png", 40}, {{}, "17_covers_downloading2.png", 400},
+        {{}, "18_covers_done.png", 6000}, {key('A'), "19_home_end.png", 1},
     };
     for (const Step& s : tour) {
         app.update(s.in);

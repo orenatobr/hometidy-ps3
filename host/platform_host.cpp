@@ -5,8 +5,12 @@
 #include <ctime>
 #include <thread>
 
+#include <map>
+
+#include "covers.h"
 #include "fsx.h"
 #include "platform.h"
+#include "sha1.h"
 
 namespace platform {
 namespace {
@@ -29,6 +33,104 @@ Env init() {
     fsx::makeDirs(env.appDir);
     g_log = std::fopen((env.appDir + "/hometidy.log").c_str(), "w");
     return env;
+}
+
+namespace {
+// The host preview has no network: every transfer fails, which is what the screen shows.
+class OfflineClient : public http::Client {
+public:
+    void start(const std::string&, std::size_t) override { failed_ = true; }
+    http::State step() override { return failed_ ? http::State::Failed : http::State::Idle; }
+    http::Progress progress() const override { return {}; }
+    int status() const override { return 0; }
+    std::string error() const override { return "no network on the host"; }
+    std::vector<std::uint8_t> take() override { return {}; }
+    void cancel() override { failed_ = false; }
+
+private:
+    bool failed_ = false;
+};
+}  // namespace
+
+// HOMETIDY_DEMO_NET=1: serves a made-up repository for the games of the fake console, slowly, so the preview
+// can show the progress screen. The images are not real pictures.
+class DemoClient : public http::Client {
+public:
+    explicit DemoClient(std::vector<library::Root> roots) : roots_(std::move(roots)) {}
+    void start(const std::string& url, std::size_t) override {
+        steps_ = 0;
+        body_.clear();
+        total_ = 0;
+        const auto tree = url.find("/git/trees/");
+        if (tree != std::string::npos) {
+            const std::string ref = url.substr(tree + 11);
+            std::string json;
+            if (ref == "master") {
+                json = R"({"tree":[{"path":"Named_Boxarts","type":"tree","sha":"demo"}],"truncated":false})";
+            } else {
+                json = R"({"tree":[)";
+                bool first = true;
+                for (const auto& root : roots_) {
+                    if (url.find(covers::sourceFor(root.platform).repo) == std::string::npos) continue;
+                    for (const std::string& n : fsx::listDir(root.path)) {
+                        if (n.size() < 5 || n.substr(n.size() - 4) != ".iso") continue;
+                        const std::string stem = n.substr(0, n.size() - 4);
+                        json += std::string(first ? "" : ",") + R"({"path":")" + stem + R"(.png","type":"blob","sha":")" + sha1::gitBlob(image(stem)) + R"("})";
+                        first = false;
+                    }
+                }
+                json += R"(],"truncated":false})";
+            }
+            body_.assign(json.begin(), json.end());
+            total_ = static_cast<long long>(body_.size());
+            need_ = 4;
+        } else {
+            std::string name = url.substr(url.rfind('/') + 1);
+            name = decode(name.substr(0, name.size() - 4));
+            body_ = image(name);
+            total_ = static_cast<long long>(body_.size());
+            need_ = 14;
+        }
+        state_ = http::State::Running;
+    }
+    http::State step() override {
+        if (state_ == http::State::Running && ++steps_ >= need_) state_ = http::State::Done;
+        return state_;
+    }
+    http::Progress progress() const override { return {total_ * std::min(steps_, need_) / std::max(need_, 1), total_}; }
+    int status() const override { return 200; }
+    std::string error() const override { return ""; }
+    std::vector<std::uint8_t> take() override { return std::move(body_); }
+    void cancel() override { state_ = http::State::Idle; }
+
+private:
+    static std::vector<std::uint8_t> image(const std::string& name) {
+        std::vector<std::uint8_t> b(180 * 1024 + name.size() * 977);
+        for (std::size_t i = 0; i < b.size(); ++i) b[i] = static_cast<std::uint8_t>(name[i % name.size()] + i);
+        return b;
+    }
+    static std::string decode(const std::string& s) {
+        std::string out;
+        for (std::size_t i = 0; i < s.size(); ++i) {
+            if (s[i] == '%' && i + 2 < s.size()) {
+                out.push_back(static_cast<char>(std::stoi(s.substr(i + 1, 2), nullptr, 16)));
+                i += 2;
+            } else {
+                out.push_back(s[i]);
+            }
+        }
+        return out;
+    }
+    std::vector<library::Root> roots_;
+    http::State state_ = http::State::Idle;
+    std::vector<std::uint8_t> body_;
+    long long total_ = 0;
+    int steps_ = 0, need_ = 1;
+};
+
+std::unique_ptr<http::Client> makeHttp(const Env& env) {
+    if (std::getenv("HOMETIDY_DEMO_NET")) return std::make_unique<DemoClient>(env.roots);
+    return std::make_unique<OfflineClient>();
 }
 
 void shutdown() {

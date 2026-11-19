@@ -2,6 +2,13 @@
 
 Every release lists what changed here, newest first. The section of a version is its release notes: `tools/release_notes.sh` prints it and `tools/dist.sh` refuses to package a version that has none. The version lives in `VERSION`; the app, `PARAM.SFO`, the package art and the file names (`hometidy_ps3_v<version>.pkg`) all read it, and the tag is `v<version>`.
 
+## v1.1.0
+- New: **Update covers**, a third card on the first screen, for PS3, PS2 and PS1 games. It connects to the cover repositories (libretro-thumbnails on GitHub, one per platform) and, for each game, checks whether a cover exists next to the game image. If it does, its git id (SHA-1 of the file) is compared with the id the repository lists; when they differ the repository image overwrites the local one. A missing cover is downloaded.
+- A progress screen shows the image being downloaded with its own bar (bytes), a bar for all games, and counters (new, replaced, already up to date, kept, not in the repository, failed). The stop button cancels.
+- Safe by construction: HTTPS only with the certificate verified against roots built into the app, every download is checked against the id announced by the repository before it is written (a `.part` file is renamed over the cover), covers marked as completed are kept, and a list the repository cut short is refused.
+- The first screen is now three cards stacked, to fit the third one.
+- Checked against the live repositories from a computer (the same download code, a game of each platform: added, replaced, matched a name with a `[SERIAL]` tag, second run all up to date). Not run on a console yet: the PS3 network stack (libcurl and mbedTLS from the ps3dev portlibs) was only built, not run. If the app says a list could not be read, check the console date and time and the network.
+
 ## v1.0.3
 - Tomb Raider is ordered by release date: Tomb Raider, II, III, The Last Revelation, Chronicles, then The Angel of Darkness, Legend, Anniversary, Underworld and Trilogy. Before, The Last Revelation (1999) came before II (1997) and III (1998): a title with no number in its name was treated as an unlisted title and went ahead of the numbered ones.
 - The same defect in two more series of the PS1 list is fixed: Spyro (Spyro the Dragon, Spyro 2, Year of the Dragon, which came last-to-first) and Mortal Kombat (Trilogy, 1996, before Mythologies: Sub-Zero, 1997).

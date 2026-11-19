@@ -4,6 +4,7 @@
 #include <cstdio>
 
 #include "badge.h"
+#include "covers.h"
 #include "default_rules.h"
 #include "fsx.h"
 #include "texts.h"
@@ -40,6 +41,26 @@ std::string fmt(const char* f, int a) {
     return b;
 }
 
+std::string fmtS(const char* f, const std::string& a) {
+    char b[512];
+    std::snprintf(b, sizeof b, f, a.c_str());
+    return b;
+}
+
+std::string fmt2(const char* f, int a, int b) {
+    char buf[256];
+    std::snprintf(buf, sizeof buf, f, a, b);
+    return buf;
+}
+
+// "1.2 MB" / "340 KB"
+std::string sizeText(long long bytes) {
+    char b[32];
+    if (bytes >= 1024 * 1024) std::snprintf(b, sizeof b, "%.1f MB", double(bytes) / (1024.0 * 1024.0));
+    else std::snprintf(b, sizeof b, "%lld KB", (bytes + 1023) / 1024);
+    return b;
+}
+
 std::string tr(Id id) { return strings::get(id); }
 
 }  // namespace
@@ -60,6 +81,17 @@ void App::saveConfig() {
     const std::string text = strings::current() == strings::Lang::Pt ? "lang=pt\n" : "lang=en\n";
     fsx::makeDirs(env_.appDir);
     fsx::writeBytes(env_.appDir + "/config.txt", std::vector<std::uint8_t>(text.begin(), text.end()));
+}
+
+void App::scanGames() {
+    games_ = library::scan(env_.roots);
+    std::stable_sort(games_.begin(), games_.end(), [&](const library::Game& a, const library::Game& b) {
+        return sorter::less(sorter::makeKey(a.name, rules_), sorter::makeKey(b.name, rules_));
+    });
+    tabs_.clear();
+    for (const library::Platform p : {library::Platform::Ps3, library::Platform::Ps2, library::Platform::Psx}) {
+        if (std::any_of(games_.begin(), games_.end(), [&](const library::Game& g) { return g.platform == p; })) tabs_.push_back(p);
+    }
 }
 
 void App::load() {
@@ -83,13 +115,7 @@ void App::load() {
         platform::log("game list %s: not found", env_.xmlPath.c_str());
     }
 
-    games_ = library::scan(env_.roots);
-    std::stable_sort(games_.begin(), games_.end(), [&](const library::Game& a, const library::Game& b) {
-        return sorter::less(sorter::makeKey(a.name, rules_), sorter::makeKey(b.name, rules_));
-    });
-    for (const library::Platform p : {library::Platform::Ps3, library::Platform::Ps2, library::Platform::Psx}) {
-        if (std::any_of(games_.begin(), games_.end(), [&](const library::Game& g) { return g.platform == p; })) tabs_.push_back(p);
-    }
+    scanGames();
     platform::log("loaded: rules=%zu games=%zu tabs=%zu storageOk=%d", rules_.size(), games_.size(), tabs_.size(), env_.storageOk);
     screen_ = Screen::Home;
 }
@@ -136,6 +162,7 @@ void App::update(const platform::Input& in) {
             if (in.b) screen_ = Screen::Home;
             break;
         case Screen::Mark: updateMark(in); break;
+        case Screen::Covers: updateCovers(in); break;
         case Screen::Message:
             if (in.a || in.b) screen_ = msgBack_;
             break;
@@ -144,7 +171,8 @@ void App::update(const platform::Input& in) {
 }
 
 void App::updateHome(const platform::Input& in) {
-    if (in.left || in.right || in.up || in.down) homeFocus_ = 1 - homeFocus_;
+    if (in.left || in.up) homeFocus_ = (homeFocus_ + 2) % 3;
+    if (in.right || in.down) homeFocus_ = (homeFocus_ + 1) % 3;
     if (in.b) quit_ = true;
     if (!in.a) return;
     if (!env_.storageOk) {
@@ -152,7 +180,8 @@ void App::updateHome(const platform::Input& in) {
         return;
     }
     if (homeFocus_ == 0) enterSort();
-    else enterMark();
+    else if (homeFocus_ == 1) enterMark();
+    else enterCovers();
 }
 
 void App::enterSort() {
@@ -372,6 +401,7 @@ void App::draw() {
             break;
         case Screen::SortDone: drawDone(); break;
         case Screen::Mark: drawMark(); break;
+        case Screen::Covers: drawCovers(); break;
         case Screen::Message: drawMessage(); break;
     }
     if (busy_ > 0) {
@@ -448,39 +478,50 @@ void App::toastDraw() {
 
 void App::drawHome() {
     header(tr(Id::AppTagline));
-    const int cardW = 560, cardH = 400, y = 130;
-    for (int i = 0; i < 2; ++i) {
-        const int x = kMargin + i * (cardW + 32);
+    const int cardW = 1280 - 2 * kMargin, cardH = 124, gap = 16, top = 118;
+    for (int i = 0; i < 3; ++i) {
+        const int x = kMargin, y = top + i * (cardH + gap);
         const bool focus = homeFocus_ == i;
         if (focus) c_.fill(x - 6, y - 6, cardW + 12, cardH + 12, 30, col::green);
         c_.card(x, y, cardW, cardH, 24, focus ? col::raised : col::card, 2, col::line);
 
-        const int ix = x + 40, iy = y + 40;
+        const int ix = x + 32, iy = y + 16;
         if (i == 0) {  // bars shrinking = sorted list
-            const int widths[4] = {88, 70, 52, 34};
-            for (int k = 0; k < 4; ++k) c_.fill(ix, iy + k * 24, widths[k], 14, 7, k == 0 ? col::green : col::muted);
-        } else {  // cover tile with a check
+            const int widths[4] = {70, 56, 42, 28};
+            for (int k = 0; k < 4; ++k) c_.fill(ix, iy + 10 + k * 20, widths[k], 12, 6, k == 0 ? col::green : col::muted);
+        } else {
             c_.fill(ix, iy, 92, 92, 16, col::line);
             c_.fill(ix + 12, iy + 12, 68, 68, 10, col::card);
-            c_.checkBadge(ix + 74, iy + 18, 26, col::green, col::bg);
+            if (i == 1) {  // cover tile with a check
+                c_.checkBadge(ix + 74, iy + 18, 26, col::green, col::bg);
+            } else {  // cover tile with a download arrow
+                c_.line(ix + 46, iy + 24, ix + 46, iy + 56, 6, col::green);
+                c_.line(ix + 30, iy + 44, ix + 46, iy + 60, 6, col::green);
+                c_.line(ix + 62, iy + 44, ix + 46, iy + 60, 6, col::green);
+            }
         }
-        c_.text(tr(i == 0 ? Id::SortTitle : Id::MarkTitle), Size::Large, col::text, x + 40, y + 152);
-        const auto lines = c_.wrap(tr(i == 0 ? Id::SortDesc : Id::MarkDesc), Size::Body, cardW - 80);
-        for (std::size_t k = 0; k < lines.size() && k < 4; ++k) {
-            c_.text(lines[k], Size::Body, col::muted, x + 40, y + 204 + int(k) * 34);
+        const Id titles[3] = {Id::SortTitle, Id::MarkTitle, Id::CoversTitle};
+        const Id descs[3] = {Id::SortDesc, Id::MarkDesc, Id::CoversDesc};
+        const int tx = x + 160, textW = 640;
+        c_.text(tr(titles[i]), Size::Large, col::text, tx, y + 14, Align::Left, textW);
+        const auto lines = c_.wrap(tr(descs[i]), Size::Small, textW);
+        for (std::size_t k = 0; k < lines.size() && k < 2; ++k) {
+            c_.text(lines[k], Size::Small, col::muted, tx, y + 58 + int(k) * 28);
         }
         const std::string status = i == 0 ? fmt(tr(Id::SortStatus).c_str(), listGames_) : fmt(tr(Id::MarkStatus).c_str(), int(games_.size()));
         const int sw = c_.textWidth(status, Size::Small) + 36;
-        c_.fill(x + 40, y + cardH - 70, sw, 40, 20, focus ? col::card : col::raised);
-        c_.text(status, Size::Small, col::text, x + 40 + sw / 2, y + cardH - 70 + 7, Align::Center);
+        const int px = x + cardW - 32 - sw, py = y + 26;
+        c_.fill(px, py, sw, 40, 20, focus ? col::card : col::raised);
+        c_.text(status, Size::Small, col::text, px + sw / 2, py + 7, Align::Center);
         if (i == 0 && listGames_ > 0) {
             const std::string note = listMoves_ > 0 ? fmt(tr(Id::ListMoves).c_str(), listMoves_) : tr(Id::ListSorted);
-            c_.text(note, Size::Small, listMoves_ > 0 ? col::amber : col::green, x + 40 + sw + 16, y + cardH - 70 + 7);
+            c_.text(note, Size::Small, listMoves_ > 0 ? col::amber : col::green, px + sw / 2, py + 52, Align::Center);
         }
     }
-    if (!env_.storageOk) c_.text(tr(Id::NoAccess), Size::Small, col::red, kMargin, 558, Align::Left, 1150);
-    else if (listGames_ == 0) c_.text(tr(Id::NoList), Size::Small, col::amber, kMargin, 558, Align::Left, 1150);
-    else c_.text(tr(Id::ListFile) + ": " + env_.xmlPath, Size::Small, col::muted, kMargin, 558, Align::Left, 1150);
+    const int noteY = top + 3 * (cardH + gap) + 4;
+    if (!env_.storageOk) c_.text(tr(Id::NoAccess), Size::Small, col::red, kMargin, noteY, Align::Left, 1150);
+    else if (listGames_ == 0) c_.text(tr(Id::NoList), Size::Small, col::amber, kMargin, noteY, Align::Left, 1150);
+    else c_.text(tr(Id::ListFile) + ": " + env_.xmlPath, Size::Small, col::muted, kMargin, noteY, Align::Left, 1150);
     hints({{Btn::DPad, tr(Id::HintSelect)}, {Btn::Confirm, tr(Id::HintApply)}, {Btn::Square, tr(Id::HintLanguage)},
            {Btn::Back, tr(Id::HintExit)}});
 }
@@ -564,6 +605,122 @@ void App::drawDone() {
         ty += 34;
     }
     hints({{Btn::Confirm, tr(Id::HintClose)}, {Btn::Back, tr(Id::HintBack)}});
+}
+
+// ---------------------------------------------------------------- covers --
+
+void App::enterCovers() {
+    if (games_.empty()) {
+        showMessage(tr(Id::CoversTitle), tr(Id::NoGames), col::amber, Screen::Home);
+        return;
+    }
+    sync_.reset();
+    screen_ = Screen::Covers;
+}
+
+void App::startCovers() {
+    if (!http_) http_ = platform::makeHttp(env_);
+    sync_ = std::make_unique<coversync::Sync>(*http_, games_);
+    platform::log("covers: start, %zu games", games_.size());
+}
+
+void App::updateCovers(const platform::Input& in) {
+    if (!sync_) {
+        if (in.a) startCovers();
+        else if (in.b) screen_ = Screen::Home;
+        return;
+    }
+    if (!sync_->done()) {
+        dirty_ = true;
+        if (in.b) {
+            sync_->cancel();
+        } else {
+            for (int i = 0; i < 2 && !sync_->done(); ++i) sync_->step();  // two steps per frame: hashing a cover is the slow part
+        }
+        if (sync_->done()) {
+            const coversync::Progress& p = sync_->progress();
+            platform::log("covers: end added=%d replaced=%d same=%d marked=%d missing=%d failed=%d indexErrors=%d last=%s", p.counts.added,
+                          p.counts.replaced, p.counts.same, p.counts.marked, p.counts.missing, p.counts.failed, p.indexErrors,
+                          p.lastError.c_str());
+            covers_.clear();  // new images on disk
+            scanGames();
+        }
+        return;
+    }
+    if (in.a || in.b) {
+        sync_.reset();
+        screen_ = Screen::Home;
+    }
+}
+
+void App::drawBar(int x, int y, int w, double fraction, bool unknown) {
+    c_.fill(x, y, w, 20, 10, col::raised);
+    if (unknown) {  // total size not announced: a block sweeping across
+        const int block = w / 5;
+        const int pos = (frame_ * 12) % (w + block) - block;
+        const int x0 = std::max(0, pos), x1 = std::min(w, pos + block);
+        if (x1 > x0) c_.fill(x + x0, y, x1 - x0, 20, 10, col::green);
+        return;
+    }
+    const int fill = static_cast<int>(std::clamp(fraction, 0.0, 1.0) * w);
+    if (fill >= 20) c_.fill(x, y, fill, 20, 10, col::green);
+    else if (fill > 0) c_.fill(x, y, 20, 20, 10, col::green);
+}
+
+void App::drawCovers() {
+    header(tr(Id::CoversTitle));
+    const int x = kMargin, y = 122, w = 1280 - 2 * kMargin, h = 490;
+    c_.card(x, y, w, h, 20, col::card, 2, col::line);
+    if (!sync_) {
+        const auto lines = c_.wrap(tr(Id::CoversIntro), Size::Body, w - 80);
+        for (std::size_t k = 0; k < lines.size() && k < 6; ++k) c_.text(lines[k], Size::Body, col::text, x + 40, y + 36 + int(k) * 36);
+        c_.text(tr(Id::CoversSource), Size::Small, col::muted, x + 40, y + 276);
+        int ly = y + 312;
+        for (const library::Platform p : tabs_) {
+            c_.text(std::string(library::label(p)) + "   github.com/" + covers::sourceFor(p).repo, Size::Body, col::text, x + 40, ly);
+            ly += 40;
+        }
+        hints({{Btn::Confirm, tr(Id::HintStart)}, {Btn::Back, tr(Id::HintBack)}});
+        return;
+    }
+
+    const coversync::Progress& p = sync_->progress();
+    const bool done = sync_->done();
+    const int bw = w - 80;
+    // what is happening
+    std::string what;
+    if (done) what = tr(p.cancelled ? Id::CoversStopped : Id::CoversDone);
+    else if (p.phase == coversync::Phase::Downloading) what = p.file;
+    else what = fmtS(tr(Id::CoversReading).c_str(), library::label(p.platform));
+    c_.text(what, Size::Large, done && !p.cancelled && p.counts.failed == 0 ? col::green : col::text, x + 40, y + 32, Align::Left, bw);
+
+    // this transfer
+    if (!done) {
+        const bool known = p.bytesTotal > 0;
+        drawBar(x + 40, y + 100, bw, known ? double(p.bytes) / double(p.bytesTotal) : 0.0, !known && p.phase != coversync::Phase::Starting);
+        std::string sizes = sizeText(p.bytes);
+        if (known) sizes += " / " + sizeText(p.bytesTotal);
+        c_.text(sizes, Size::Small, col::muted, x + w - 40, y + 130, Align::Right);
+    }
+    // all games
+    const double overall = p.total > 0 ? double(p.index) / double(p.total) : 0.0;
+    c_.text(fmt2(tr(Id::CoversOverall).c_str(), p.index, p.total), Size::Body, col::text, x + 40, y + 176);
+    drawBar(x + 40, y + 216, bw, done && !p.cancelled ? 1.0 : overall, false);
+
+    // counters
+    const std::pair<Id, int> rows[] = {{Id::CvAdded, p.counts.added},   {Id::CvReplaced, p.counts.replaced}, {Id::CvSame, p.counts.same},
+                                       {Id::CvMarked, p.counts.marked}, {Id::CvMissing, p.counts.missing},   {Id::CvFailed, p.counts.failed}};
+    for (int i = 0; i < 6; ++i) {
+        const int cx = x + 40 + (i % 2) * (bw / 2), cy = y + 268 + (i / 2) * 40;
+        const bool bad = rows[i].first == Id::CvFailed && rows[i].second > 0;
+        c_.text(fmt(tr(rows[i].first).c_str(), rows[i].second), Size::Body, bad ? col::red : col::muted, cx, cy, Align::Left, bw / 2 - 20);
+    }
+    if (p.indexErrors > 0 || (p.counts.failed > 0 && !p.lastError.empty())) {
+        c_.text(p.lastError, Size::Small, col::amber, x + 40, y + 396, Align::Left, bw);
+        c_.text(tr(Id::CoversNetHint), Size::Small, col::muted, x + 40, y + 428, Align::Left, bw);
+    }
+    if (done) hints({{Btn::Confirm, tr(Id::HintBack)}});
+    else hints({{Btn::Back, tr(Id::HintStop)}});
 }
 
 void App::drawMessage() {

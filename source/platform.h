@@ -2,9 +2,11 @@
 #pragma once
 
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <vector>
 
+#include "http.h"
 #include "library.h"
 
 namespace platform {
@@ -32,6 +34,10 @@ struct Env {
 
 /// Opens the storage and controllers.
 Env init();
+
+/// Opens the network and returns the HTTP client the cover update uses. The client always verifies the server
+/// certificate. When the network cannot be opened (or on the host preview) the client fails every request.
+std::unique_ptr<http::Client> makeHttp(const Env& env);
 
 /// Releases everything opened by init().
 void shutdown();
