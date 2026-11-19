@@ -36,6 +36,10 @@ void Sync::loadDb() {
         const auto a = line.find('\t');
         const auto b = a == std::string::npos ? a : line.find('\t', a + 1);
         if (b == std::string::npos) continue;
+        if (line[0] == '@') {  // "@<link id>\t<target>\t"
+            links_[line.substr(1, a - 1)] = line.substr(a + 1, b - a - 1);
+            continue;
+        }
         db_[line.substr(0, a)] = {line.substr(a + 1, b - a - 1), line.substr(b + 1)};
     }
 }
@@ -44,6 +48,7 @@ void Sync::saveDb() const {
     if (dbPath_.empty()) return;
     std::string text;
     for (const auto& [path, w] : db_) text += path + "\t" + w.remote + "\t" + w.local + "\n";
+    for (const auto& [id, target] : links_) text += "@" + id + "\t" + target + "\t\n";
     const std::string tmp = dbPath_ + ".new";
     if (fsx::writeBytes(tmp, std::vector<std::uint8_t>(text.begin(), text.end()))) fsx::renameFile(tmp, dbPath_);
 }
@@ -56,6 +61,7 @@ void Sync::step() {
         case Stage::Game: nextGame(); break;
         case Stage::Link: pollLink(); break;
         case Stage::Download: pollDownload(); break;
+        case Stage::FallbackHead: pollFallbackHead(); break;
         case Stage::Fallback: pollFallback(); break;
         case Stage::End: finish(); break;
     }
@@ -198,6 +204,10 @@ void Sync::tryRemote(const covers::Remote& remote) {
     remote_ = remote;
     if (remote_.symlink) {
         if (++hops_ > kMaxHops) return failGame("too many links");
+        const auto known = links_.find(remote_.sha);  // a blob id fixes the content: no need to read the link again
+        if (known != links_.end()) {
+            if (const covers::Remote* next = covers::findTarget(index_, known->second)) return tryRemote(*next);
+        }
         const covers::Source& src = covers::sourceFor(game_->platform);
         progress_.file = remote_.name + ".png";
         progress_.phase = Phase::Downloading;
@@ -210,7 +220,15 @@ void Sync::tryRemote(const covers::Remote& remote) {
         ++progress_.counts.same;
         return finishGame();
     }
+    if (!localSha_.empty() && localSha_ == remote_.sha) return useLocalAsSource();  // the repository image is already here
     startDownload(remote_);
+}
+
+// The local file is byte for byte the repository image (an unshrunk copy): shrink it in place without a download.
+void Sync::useLocalAsSource() {
+    std::vector<std::uint8_t> local, framedBytes;
+    if (!fsx::readBytes(game_->image, local) || !frame::fit(local, frame::kSize, framedBytes)) return startDownload(remote_);
+    store(framedBytes, remote_.sha, false);
 }
 
 void Sync::startDownload(const covers::Remote& remote) {
@@ -233,13 +251,14 @@ void Sync::pollLink() {
     const std::string target = covers::linkTarget(std::string(body.begin(), body.end()));
     const covers::Remote* next = target.empty() ? nullptr : covers::findTarget(index_, target);
     if (!next) return failGame("link to a missing image");
+    links_[remote_.sha] = target;
     tryRemote(*next);
 }
 
 void Sync::store(const std::vector<std::uint8_t>& framed, const std::string& remoteSha, bool fromFallback) {
     const std::string written = sha1::gitBlob(framed);
     if (!localSha_.empty() && localSha_ == written) {  // the cover on the console is already this one
-        if (!fromFallback) db_[target_] = {remoteSha, written};
+        if (!remoteSha.empty()) db_[target_] = {remoteSha, written};
         ++progress_.counts.same;
         return finishGame();
     }
@@ -248,7 +267,7 @@ void Sync::store(const std::vector<std::uint8_t>& framed, const std::string& rem
         fsx::removeFile(part);
         return failGame("could not write the file");
     }
-    if (!fromFallback) db_[target_] = {remoteSha, written};
+    if (!remoteSha.empty()) db_[target_] = {remoteSha, written};
     if (localSha_.empty()) ++progress_.counts.added;
     else ++progress_.counts.replaced;
     if (fromFallback) ++progress_.counts.fallback;
@@ -271,11 +290,36 @@ void Sync::pollDownload() {
     store(framed, remote_.sha, false);
 }
 
+// A HEAD first: the server's ETag and size say whether the image changed, without fetching it.
 void Sync::startFallback() {
     progress_.file = game_->name + ".png";
-    progress_.phase = Phase::Downloading;
+    progress_.phase = Phase::Checking;
     progress_.bytes = 0;
     progress_.bytesTotal = -1;
+    validator_.clear();
+    client_.startHead(covers::gametdbUrl(titleId_, regions_[regionPos_]));
+    stage_ = Stage::FallbackHead;
+}
+
+void Sync::pollFallbackHead() {
+    const http::State st = client_.step();
+    if (st == http::State::Running || st == http::State::Idle) return;
+    if (st == http::State::Failed) return failGame(client_.error());
+    const int status = client_.status();
+    if (status == 404) {  // not in this region folder: try the next, then the repository's other names
+        if (++regionPos_ < regions_.size()) return startFallback();
+        return afterFallbackMiss();
+    }
+    if (status == 200) {
+        const std::string etag = client_.header("etag"), size = client_.header("content-length");
+        if (!etag.empty() && !size.empty()) validator_ = "gametdb:" + etag + "|" + size;
+    }
+    const auto it = db_.find(target_);
+    if (!validator_.empty() && !localSha_.empty() && it != db_.end() && it->second.remote == validator_ && it->second.local == localSha_) {
+        ++progress_.counts.same;  // same image on the server, same file here
+        return finishGame();
+    }
+    progress_.phase = Phase::Downloading;
     client_.start(covers::gametdbUrl(titleId_, regions_[regionPos_]), kMaxImageBytes);
     stage_ = Stage::Fallback;
 }
@@ -287,7 +331,7 @@ void Sync::pollFallback() {
     progress_.bytesTotal = pr.total;
     if (st == http::State::Running || st == http::State::Idle) return;
     if (st == http::State::Failed) return failGame(client_.error());
-    if (client_.status() == 404) {  // not in this region folder: try the next, then the repository's other names
+    if (client_.status() == 404) {
         if (++regionPos_ < regions_.size()) return startFallback();
         return afterFallbackMiss();
     }
@@ -295,7 +339,7 @@ void Sync::pollFallback() {
     const std::vector<std::uint8_t> body = client_.take();
     std::vector<std::uint8_t> framed;
     if (!frame::fit(body, frame::kSize, framed)) return failGame("not a usable image");
-    store(framed, "", true);
+    store(framed, validator_, true);
 }
 
 }  // namespace coversync

@@ -2,6 +2,14 @@
 
 Every release lists what changed here, newest first. The section of a version is its release notes: `tools/release_notes.sh` prints it and `tools/dist.sh` refuses to package a version that has none. The version lives in `VERSION`; the app, `PARAM.SFO`, the package art and the file names (`hometidy_ps3_v<version>.pkg`) all read it, and the tag is `v<version>`.
 
+## v1.2.1
+Update covers no longer downloads what is already here.
+- PS3 covers from the fallback server (GameTDB) were fetched again on every run, only to compare them. The server lists no ids, so the app now sends a HEAD request (headers only, no image) and compares the ETag and size with the ones recorded when it wrote the cover. Same image on the server and same file here: nothing is downloaded. A changed ETag fetches the image again.
+- A symbolic link of the PS1 and PS2 repositories was read on every run to learn which image it points to. A blob id fixes the content of a link, so the answer is recorded and the link is not read again.
+- A cover that is byte for byte the repository image (what v1.1.0 saved, unshrunk) is shrunk in place instead of being downloaded again.
+- Measured from a computer on the owner's 177 games with the real repositories: a run where everything is current takes about 3 seconds and downloads no image (before, about 50 seconds). The first run after this version also records the new data, with no image fetched.
+- `covers.db` has two more kinds of lines: `gametdb:<etag>|<size>` as the remote id of a fallback cover, and `@<link id>` lines for resolved links. An older `covers.db` keeps working.
+
 ## v1.2.0
 Found by running v1.1.0 on a console and reading the files it wrote over FTP.
 - Covers that did not show in the XMB: the PS1 and PS2 repositories store a repeated image as a symbolic link, and a link is a 26-byte text file holding the name of the real image. v1.1.0 saved that text as the `.png`. Links are now followed to the real image. The 26-byte files v1.1.0 left are replaced by the next update.
