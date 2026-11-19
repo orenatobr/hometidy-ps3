@@ -5,8 +5,10 @@
 #include <ctime>
 #include <thread>
 
+#include <functional>
 #include <map>
 
+#include "badge.h"
 #include "covers.h"
 #include "fsx.h"
 #include "platform.h"
@@ -29,7 +31,6 @@ Env init() {
                  {g_root + "/dev_hdd0/PSXISO", library::Platform::Psx}};
     env.storageOk = fsx::isDir(g_root + "/dev_hdd0");
     env.circleConfirms = std::getenv("HOMETIDY_CIRCLE") != nullptr;
-    env.systemPortuguese = std::getenv("HOMETIDY_LANG_PT") != nullptr;
     fsx::makeDirs(env.appDir);
     g_log = std::fopen((env.appDir + "/hometidy.log").c_str(), "w");
     return env;
@@ -75,7 +76,7 @@ public:
                     for (const std::string& n : fsx::listDir(root.path)) {
                         if (n.size() < 5 || n.substr(n.size() - 4) != ".iso") continue;
                         const std::string stem = n.substr(0, n.size() - 4);
-                        json += std::string(first ? "" : ",") + R"({"path":")" + stem + R"(.png","type":"blob","sha":")" + sha1::gitBlob(image(stem)) + R"("})";
+                        json += std::string(first ? "" : ",") + R"({"path":")" + stem + R"(.png","mode":"100644","type":"blob","sha":")" + sha1::gitBlob(image(stem)) + R"("})";
                         first = false;
                     }
                 }
@@ -105,9 +106,19 @@ public:
 
 private:
     static std::vector<std::uint8_t> image(const std::string& name) {
-        std::vector<std::uint8_t> b(180 * 1024 + name.size() * 977);
-        for (std::size_t i = 0; i < b.size(); ++i) b[i] = static_cast<std::uint8_t>(name[i % name.size()] + i);
-        return b;
+        badge::Image img;
+        img.w = 320, img.h = 440;
+        img.rgba.resize(std::size_t(img.w) * img.h * 4);
+        const unsigned seed = static_cast<unsigned>(std::hash<std::string>{}(name));
+        for (int y = 0; y < img.h; ++y) {
+            for (int x = 0; x < img.w; ++x) {
+                std::uint8_t* p = &img.rgba[(std::size_t(y) * img.w + x) * 4];
+                p[0] = static_cast<std::uint8_t>(seed + x), p[1] = static_cast<std::uint8_t>((seed >> 8) + y), p[2] = static_cast<std::uint8_t>((seed >> 16) + x / 2 + y / 3), p[3] = 255;
+            }
+        }
+        std::vector<std::uint8_t> out;
+        badge::encode(img, badge::Format::Png, out);
+        return out;
     }
     static std::string decode(const std::string& s) {
         std::string out;

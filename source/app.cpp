@@ -69,20 +69,6 @@ App::App(gfx::Canvas& canvas, platform::Env env) : c_(canvas), env_(std::move(en
 
 // ------------------------------------------------------------- lifecycle --
 
-void App::loadConfig() {
-    strings::set(env_.systemPortuguese ? strings::Lang::Pt : strings::Lang::En);
-    std::string text;
-    if (!fsx::readFile(env_.appDir + "/config.txt", text)) return;
-    if (text.find("lang=pt") != std::string::npos) strings::set(strings::Lang::Pt);
-    if (text.find("lang=en") != std::string::npos) strings::set(strings::Lang::En);
-}
-
-void App::saveConfig() {
-    const std::string text = strings::current() == strings::Lang::Pt ? "lang=pt\n" : "lang=en\n";
-    fsx::makeDirs(env_.appDir);
-    fsx::writeBytes(env_.appDir + "/config.txt", std::vector<std::uint8_t>(text.begin(), text.end()));
-}
-
 void App::scanGames() {
     games_ = library::scan(env_.roots);
     std::stable_sort(games_.begin(), games_.end(), [&](const library::Game& a, const library::Game& b) {
@@ -95,8 +81,6 @@ void App::scanGames() {
 }
 
 void App::load() {
-    loadConfig();
-
     std::string user;
     if (fsx::readFile(env_.appDir + "/series.txt", user)) rules_ = sorter::parseRules(user);
     for (const auto& r : sorter::parseRules(kDefaultRules)) rules_.push_back(r);  // user rules win
@@ -109,14 +93,15 @@ void App::load() {
                 listMoves_ += s.moves();
             }
         }
-        platform::log("game list %s: %zu bytes, valid=%d, games=%d, to move=%d", env_.xmlPath.c_str(), xmlText_.size(),
+        platform::log("game list %s: %lu bytes, valid=%d, games=%d, to move=%d", env_.xmlPath.c_str(), static_cast<unsigned long>(xmlText_.size()),
                       plan.has_value(), listGames_, listMoves_);
     } else {
         platform::log("game list %s: not found", env_.xmlPath.c_str());
     }
 
     scanGames();
-    platform::log("loaded: rules=%zu games=%zu tabs=%zu storageOk=%d", rules_.size(), games_.size(), tabs_.size(), env_.storageOk);
+    platform::log("loaded: rules=%lu games=%lu tabs=%lu storageOk=%d", static_cast<unsigned long>(rules_.size()),
+                  static_cast<unsigned long>(games_.size()), static_cast<unsigned long>(tabs_.size()), env_.storageOk);
     screen_ = Screen::Home;
 }
 
@@ -146,11 +131,6 @@ void App::update(const platform::Input& in) {
     if (busy_ > 0) {
         dirty_ = true;
         if (--busy_ == 0) applySort();
-        return;
-    }
-    if (in.y && screen_ == Screen::Home) {
-        strings::set(strings::current() == strings::Lang::En ? strings::Lang::Pt : strings::Lang::En);
-        saveConfig();
         return;
     }
     switch (screen_) {
@@ -191,8 +171,8 @@ void App::enterSort() {
         return;
     }
     plan_ = tasks::planSort(xml, rules_);
-    platform::log("sort plan: %zu bytes read, valid=%d, segments=%zu, changed=%d", xml.size(), plan_.has_value(),
-                  plan_ ? plan_->segments.size() : 0, plan_ ? plan_->changedSegments : 0);
+    platform::log("sort plan: %lu bytes read, valid=%d, segments=%lu, changed=%d", static_cast<unsigned long>(xml.size()), plan_.has_value(),
+                  static_cast<unsigned long>(plan_ ? plan_->segments.size() : 0), plan_ ? plan_->changedSegments : 0);
     if (!plan_ || plan_->segments.empty()) {
         showMessage(tr(Id::SortTitle), tr(Id::NoList), col::amber, Screen::Home);
         plan_.reset();
@@ -522,8 +502,7 @@ void App::drawHome() {
     if (!env_.storageOk) c_.text(tr(Id::NoAccess), Size::Small, col::red, kMargin, noteY, Align::Left, 1150);
     else if (listGames_ == 0) c_.text(tr(Id::NoList), Size::Small, col::amber, kMargin, noteY, Align::Left, 1150);
     else c_.text(tr(Id::ListFile) + ": " + env_.xmlPath, Size::Small, col::muted, kMargin, noteY, Align::Left, 1150);
-    hints({{Btn::DPad, tr(Id::HintSelect)}, {Btn::Confirm, tr(Id::HintApply)}, {Btn::Square, tr(Id::HintLanguage)},
-           {Btn::Back, tr(Id::HintExit)}});
+    hints({{Btn::DPad, tr(Id::HintSelect)}, {Btn::Confirm, tr(Id::HintApply)}, {Btn::Back, tr(Id::HintExit)}});
 }
 
 void App::drawSort() {
@@ -620,8 +599,8 @@ void App::enterCovers() {
 
 void App::startCovers() {
     if (!http_) http_ = platform::makeHttp(env_);
-    sync_ = std::make_unique<coversync::Sync>(*http_, games_);
-    platform::log("covers: start, %zu games", games_.size());
+    sync_ = std::make_unique<coversync::Sync>(*http_, games_, env_.appDir + "/covers.db");
+    platform::log("covers: start, %lu games", static_cast<unsigned long>(games_.size()));
 }
 
 void App::updateCovers(const platform::Input& in) {
@@ -639,8 +618,8 @@ void App::updateCovers(const platform::Input& in) {
         }
         if (sync_->done()) {
             const coversync::Progress& p = sync_->progress();
-            platform::log("covers: end added=%d replaced=%d same=%d marked=%d missing=%d failed=%d indexErrors=%d last=%s", p.counts.added,
-                          p.counts.replaced, p.counts.same, p.counts.marked, p.counts.missing, p.counts.failed, p.indexErrors,
+            platform::log("covers: end added=%d replaced=%d same=%d missing=%d failed=%d fallback=%d indexErrors=%d last=%s", p.counts.added,
+                          p.counts.replaced, p.counts.same, p.counts.missing, p.counts.failed, p.counts.fallback, p.indexErrors,
                           p.lastError.c_str());
             covers_.clear();  // new images on disk
             scanGames();
@@ -674,11 +653,14 @@ void App::drawCovers() {
     if (!sync_) {
         const auto lines = c_.wrap(tr(Id::CoversIntro), Size::Body, w - 80);
         for (std::size_t k = 0; k < lines.size() && k < 6; ++k) c_.text(lines[k], Size::Body, col::text, x + 40, y + 36 + int(k) * 36);
-        c_.text(tr(Id::CoversSource), Size::Small, col::muted, x + 40, y + 276);
-        int ly = y + 312;
+        c_.text(tr(Id::CoversSource), Size::Small, col::muted, x + 40, y + 250);
+        int ly = y + 284;
         for (const library::Platform p : tabs_) {
             c_.text(std::string(library::label(p)) + "   github.com/" + covers::sourceFor(p).repo, Size::Body, col::text, x + 40, ly);
             ly += 40;
+        }
+        if (std::find(tabs_.begin(), tabs_.end(), library::Platform::Ps3) != tabs_.end()) {
+            c_.text("PS3   art.gametdb.com (fallback)", Size::Body, col::text, x + 40, ly);
         }
         hints({{Btn::Confirm, tr(Id::HintStart)}, {Btn::Back, tr(Id::HintBack)}});
         return;
@@ -691,6 +673,7 @@ void App::drawCovers() {
     std::string what;
     if (done) what = tr(p.cancelled ? Id::CoversStopped : Id::CoversDone);
     else if (p.phase == coversync::Phase::Downloading) what = p.file;
+    else if (p.phase == coversync::Phase::Checking) what = fmtS(tr(Id::CoversChecking).c_str(), p.file);
     else what = fmtS(tr(Id::CoversReading).c_str(), library::label(p.platform));
     c_.text(what, Size::Large, done && !p.cancelled && p.counts.failed == 0 ? col::green : col::text, x + 40, y + 32, Align::Left, bw);
 
@@ -708,8 +691,8 @@ void App::drawCovers() {
     drawBar(x + 40, y + 216, bw, done && !p.cancelled ? 1.0 : overall, false);
 
     // counters
-    const std::pair<Id, int> rows[] = {{Id::CvAdded, p.counts.added},   {Id::CvReplaced, p.counts.replaced}, {Id::CvSame, p.counts.same},
-                                       {Id::CvMarked, p.counts.marked}, {Id::CvMissing, p.counts.missing},   {Id::CvFailed, p.counts.failed}};
+    const std::pair<Id, int> rows[] = {{Id::CvAdded, p.counts.added},     {Id::CvReplaced, p.counts.replaced}, {Id::CvSame, p.counts.same},
+                                       {Id::CvFallback, p.counts.fallback}, {Id::CvMissing, p.counts.missing}, {Id::CvFailed, p.counts.failed}};
     for (int i = 0; i < 6; ++i) {
         const int cx = x + 40 + (i % 2) * (bw / 2), cy = y + 268 + (i / 2) * 40;
         const bool bad = rows[i].first == Id::CvFailed && rows[i].second > 0;

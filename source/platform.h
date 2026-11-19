@@ -29,7 +29,6 @@ struct Env {
     std::vector<library::Root> roots;  ///< ISO folders to scan for covers.
     bool storageOk = false;            ///< The console storage could be opened.
     bool circleConfirms = false;       ///< Circle is "enter" (Japanese layout) instead of cross.
-    bool systemPortuguese = false;     ///< The console language is Portuguese.
 };
 
 /// Opens the storage and controllers.

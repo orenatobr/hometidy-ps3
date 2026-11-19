@@ -55,6 +55,7 @@ std::vector<Game> scan(const std::vector<Root>& roots) {
 
             Game g;
             g.name = name;
+            g.file = file;
             g.title = sorter::prettyTitle(name);
             g.platform = root.platform;
             g.dir = root.path;
