@@ -60,6 +60,23 @@ enum class Id {
     ToastNoCover,
     NoGames,
     NoAccess,
+    CoversTitle,
+    CoversDesc,
+    CoversIntro,       // what is about to happen
+    CoversSource,      // "Source"
+    HintStart,
+    HintStop,
+    CoversReading,     // "Reading the cover list of %s..."
+    CoversOverall,     // "%d of %d games"
+    CoversDone,
+    CoversStopped,
+    CvAdded,           // "%d new"
+    CvReplaced,        // "%d replaced"
+    CvSame,            // "%d already up to date"
+    CvMarked,          // "%d kept (marked as completed)"
+    CvMissing,         // "%d not in the repository"
+    CvFailed,          // "%d failed"
+    CoversNetHint,
     Count_
 };
 

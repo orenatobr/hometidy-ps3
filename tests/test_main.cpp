@@ -10,12 +10,15 @@
 
 #include "app.h"
 #include "badge.h"
+#include "coversync.h"
+#include "covers.h"
 #include "default_rules.h"
 #include "fsx.h"
 #include "gfx.h"
 #include "library.h"
 #include "mygames.h"
 #include "platform.h"
+#include "sha1.h"
 #include "sorter.h"
 #include "tasks.h"
 
@@ -536,6 +539,293 @@ static std::vector<std::uint8_t> loadFont(bool bold) { return platform::fontByte
 
 static std::uint32_t pixelAt(const gfx::Canvas& c, int x, int y) { return c.pixels()[std::size_t(y) * c.width() + x]; }
 
+
+// ----------------------------------------------------------------- covers --
+
+static Bytes bytesOf(const std::string& s) { return Bytes(s.begin(), s.end()); }
+
+static void testSha1() {
+    CHECK_EQ(sha1::hex(reinterpret_cast<const std::uint8_t*>("abc"), 3), std::string("a9993e364706816aba3e25717850c26c9cd0d89d"));
+    CHECK_EQ(sha1::hex(nullptr, 0), std::string("da39a3ee5e6b4b0d3255bfef95601890afd80709"));
+    // 56 bytes: the padding spills into a second block
+    const std::string two = "abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq";
+    CHECK_EQ(sha1::hex(reinterpret_cast<const std::uint8_t*>(two.data()), two.size()), std::string("84983e441c3bd26ebaae4aa1f95129e5e54670f1"));
+    // git blob ids, as printed by `git hash-object`
+    CHECK_EQ(sha1::gitBlob(bytesOf("hello\n")), std::string("ce013625030ba8dba906f756967f9e9ca394464a"));
+    CHECK_EQ(sha1::gitBlob({}), std::string("e69de29bb2d1d6434b8b29ae775ad8c2e48c5391"));
+}
+
+static const char* kRootTree =
+    R"({"sha":"r","url":"u","tree":[{"path":"Named_Boxarts","mode":"040000","type":"tree","sha":"boxtree","url":"x"},)"
+    R"({"path":"README.md","mode":"100644","type":"blob","sha":"aaa","size":10,"url":"y"}],"truncated":false})";
+
+static std::string folderTree(const std::vector<std::pair<std::string, std::string>>& files) {
+    std::string out = R"({"sha":"boxtree","tree":[)";
+    for (std::size_t i = 0; i < files.size(); ++i) {
+        if (i) out += ",";
+        out += R"({"path":")" + files[i].first + R"(","mode":"100644","type":"blob","sha":")" + files[i].second + R"(","size":5,"url":"z"})";
+    }
+    return out + R"(],"truncated":false})";
+}
+
+static void testCoverIndex() {
+    std::vector<covers::TreeItem> items;
+    CHECK(covers::parseTree(kRootTree, items));
+    CHECK_EQ(items.size(), std::size_t(2));
+    CHECK_EQ(covers::findSha(items, "Named_Boxarts", "tree"), std::string("boxtree"));
+    CHECK_EQ(covers::findSha(items, "Named_Boxarts", "blob"), std::string(""));
+    CHECK_EQ(covers::findSha(items, "nope", "tree"), std::string(""));
+
+    CHECK(!covers::parseTree(R"({"tree":[],"truncated":true})", items));  // cut short: not trusted
+    CHECK(!covers::parseTree("not json", items));
+    CHECK(!covers::parseTree(R"({"sha":"x"})", items));  // no tree array
+    CHECK(!covers::parseTree(R"({"tree":[{"path":"a","sha":)", items));
+    CHECK(covers::parseTree(R"({"tree":[]})", items) && items.empty());
+
+    // escapes: quote, backslash, é, a surrogate pair
+    CHECK(covers::parseTree(R"({"tree":[{"path":"a\"b\\c é 😀.png","type":"blob","sha":"s1"}]})", items));
+    CHECK_EQ(items[0].path, std::string("a\"b\\c \xC3\xA9 \xF0\x9F\x98\x80.png"));
+
+    CHECK(covers::parseTree(folderTree({{"Radiata Stories (USA).png", "s1"}, {"Notes.txt", "s2"}, {"Ico_ (Japan).PNG", "s3"}}), items));
+    const auto index = covers::indexImages(items);
+    CHECK_EQ(index.size(), std::size_t(2));  // only .png files, any letter case
+    CHECK(covers::find(index, "radiata stories (usa)") != nullptr);
+    CHECK_EQ(covers::find(index, "Radiata Stories (USA)")->sha, std::string("s1"));
+    CHECK(covers::find(index, "Radiata Stories (Europe)") == nullptr);
+    // the repository writes "_" for forbidden characters; tags like [BLUS30443] are dropped as a second try
+    CHECK(covers::find(index, "Ico: (Japan)") != nullptr);
+    CHECK(covers::find(index, "Radiata Stories (USA) [SLUS-21262]") != nullptr);
+    CHECK_EQ(covers::candidateNames("A/B: C [x]").size(), std::size_t(2));
+
+    const auto& ps2 = covers::sourceFor(library::Platform::Ps2);
+    CHECK_EQ(std::string(ps2.repo), std::string("libretro-thumbnails/Sony_-_PlayStation_2"));
+    CHECK_EQ(std::string(covers::sourceFor(library::Platform::Psx).repo), std::string("libretro-thumbnails/Sony_-_PlayStation"));
+    CHECK_EQ(std::string(covers::sourceFor(library::Platform::Ps3).repo), std::string("libretro-thumbnails/Sony_-_PlayStation_3"));
+    CHECK_EQ(covers::imageUrl(ps2, "Ico & Co (USA)"),
+             std::string("https://raw.githubusercontent.com/libretro-thumbnails/Sony_-_PlayStation_2/master/Named_Boxarts/Ico%20%26%20Co%20%28USA%29.png"));
+    CHECK_EQ(covers::treeUrl(ps2, "master"), std::string("https://api.github.com/repos/libretro-thumbnails/Sony_-_PlayStation_2/git/trees/master"));
+}
+
+// Serves canned answers; every transfer takes a few steps so the progress can be seen moving.
+class FakeClient : public http::Client {
+public:
+    struct Route {
+        int status = 200;
+        Bytes body;
+        bool fail = false;
+    };
+    std::map<std::string, Route> routes;
+    std::vector<std::string> requested;
+    std::vector<long long> seen;  // `done` bytes seen while stepping
+
+    void start(const std::string& url, std::size_t maxBytes) override {
+        requested.push_back(url);
+        max_ = maxBytes;
+        steps_ = 0;
+        current_ = routes.find(url);
+        state_ = current_ == routes.end() || current_->second.fail ? http::State::Failed : http::State::Running;
+    }
+    http::State step() override {
+        if (state_ != http::State::Running) return state_;
+        if (++steps_ >= 3) {
+            state_ = current_->second.body.size() > max_ ? http::State::Failed : http::State::Done;
+        }
+        seen.push_back(progress().done);
+        return state_;
+    }
+    http::Progress progress() const override {
+        if (current_ == routes.end()) return {};
+        const long long n = static_cast<long long>(current_->second.body.size());
+        return {n * std::min(steps_, 3) / 3, n};
+    }
+    int status() const override { return current_ == routes.end() ? 0 : current_->second.status; }
+    std::string error() const override { return "fake failure"; }
+    Bytes take() override { return current_->second.body; }
+    void cancel() override { state_ = http::State::Idle; ++cancels; }
+    int cancels = 0;
+
+private:
+    std::map<std::string, Route>::iterator current_ = routes.end();
+    std::size_t max_ = 0;
+    int steps_ = 0;
+    http::State state_ = http::State::Idle;
+};
+
+static void runSync(coversync::Sync& sync) {
+    for (int i = 0; i < 100000 && !sync.done(); ++i) sync.step();
+}
+
+static library::Game gameAt(const std::string& dir, const std::string& name, library::Platform p) {
+    library::Game g;
+    g.name = name;
+    g.title = name;
+    g.platform = p;
+    g.dir = dir;
+    for (const char* ext : {".png", ".jpg"}) {
+        if (fsx::exists(dir + "/" + name + ext)) {
+            g.image = dir + "/" + name + ext;
+            break;
+        }
+    }
+    return g;
+}
+
+static void testCoverSync() {
+    const std::string root = tempDir("sync");
+    const std::string ps3 = root + "/PS3ISO", ps2 = root + "/PS2ISO";
+    fsx::makeDirs(ps3);
+    fsx::makeDirs(ps2);
+
+    const Bytes fresh = bytesOf("new image bytes 1"), fresh2 = bytesOf("new image bytes 2"), stale = bytesOf("old image"), stale2 = bytesOf("other old");
+    badge::Image marked = makeCover();
+    badge::apply(marked);
+    Bytes markedPng;
+    badge::encode(marked, badge::Format::Png, markedPng);
+    const std::string markedSha = sha1::gitBlob(markedPng);
+    (void)markedSha;
+    Bytes plainPng;
+    badge::encode(makeCover(), badge::Format::Png, plainPng);
+
+    // PS3: one without cover, one already current, one different, one marked as completed, one the repository lacks
+    fsx::writeBytes(ps3 + "/Missing Cover (USA).iso", {});
+    fsx::writeBytes(ps3 + "/Current (USA).iso", {});
+    fsx::writeBytes(ps3 + "/Current (USA).png", plainPng);
+    fsx::writeBytes(ps3 + "/Different (USA).iso", {});
+    fsx::writeBytes(ps3 + "/Different (USA).png", stale);
+    fsx::writeBytes(ps3 + "/Finished (USA).iso", {});
+    fsx::writeBytes(ps3 + "/Finished (USA).png", markedPng);
+    fsx::writeBytes(ps3 + "/Unknown (USA).iso", {});
+    // PS2: a jpg is replaced by a png; the second game is served with bad bytes
+    fsx::writeBytes(ps2 + "/Jpg Game (USA).iso", {});
+    fsx::writeBytes(ps2 + "/Jpg Game (USA).jpg", stale2);
+    fsx::writeBytes(ps2 + "/Corrupt (USA).iso", {});
+
+    const covers::Source& s3 = covers::sourceFor(library::Platform::Ps3);
+    const covers::Source& s2 = covers::sourceFor(library::Platform::Ps2);
+    FakeClient fake;
+    auto ok = [](const std::string& body) { return FakeClient::Route{200, bytesOf(body), false}; };
+    fake.routes[covers::treeUrl(s3, "master")] = ok(kRootTree);
+    fake.routes[covers::treeUrl(s3, "boxtree")] =
+        ok(folderTree({{"Missing Cover (USA).png", sha1::gitBlob(fresh)},
+                       {"Current (USA).png", sha1::gitBlob(plainPng)},
+                       {"Different (USA).png", sha1::gitBlob(fresh2)},
+                       {"Finished (USA).png", sha1::gitBlob(fresh)}}));
+    fake.routes[covers::imageUrl(s3, "Missing Cover (USA)")] = {200, fresh, false};
+    fake.routes[covers::imageUrl(s3, "Different (USA)")] = {200, fresh2, false};
+    fake.routes[covers::treeUrl(s2, "master")] = ok(kRootTree);
+    fake.routes[covers::treeUrl(s2, "boxtree")] =
+        ok(folderTree({{"Jpg Game (USA).png", sha1::gitBlob(fresh)}, {"Corrupt (USA).png", sha1::gitBlob(fresh)}}));
+    fake.routes[covers::imageUrl(s2, "Jpg Game (USA)")] = {200, fresh, false};
+    fake.routes[covers::imageUrl(s2, "Corrupt (USA)")] = {200, bytesOf("tampered bytes!!"), false};
+
+    std::vector<library::Game> games;
+    for (const char* n : {"Missing Cover (USA)", "Current (USA)", "Different (USA)", "Finished (USA)", "Unknown (USA)"}) {
+        games.push_back(gameAt(ps3, n, library::Platform::Ps3));
+    }
+    for (const char* n : {"Jpg Game (USA)", "Corrupt (USA)"}) games.push_back(gameAt(ps2, n, library::Platform::Ps2));
+    CHECK(games[1].platform == library::Platform::Ps3 && !games[1].image.empty());
+
+    coversync::Sync sync(fake, games);
+    CHECK(!sync.done());
+    CHECK_EQ(sync.progress().total, 7);
+    // it advances a little per step and reports what it is doing
+    bool sawDownloading = false, sawName = false;
+    for (int i = 0; i < 100000 && !sync.done(); ++i) {
+        sync.step();
+        if (sync.progress().phase == coversync::Phase::Downloading) {
+            sawDownloading = true;
+            sawName |= sync.progress().file == "Missing Cover (USA).png";
+        }
+    }
+    CHECK(sync.done());
+    CHECK(sawDownloading && sawName);
+    const auto& c = sync.progress().counts;
+    CHECK_EQ(c.added, 1);     // Missing Cover
+    CHECK_EQ(c.replaced, 2);  // Different, and Jpg Game (its jpg is superseded by the repository png)
+    CHECK_EQ(c.same, 1);      // Current
+    CHECK_EQ(c.marked, 1);    // Finished
+    CHECK_EQ(c.missing, 1);   // Unknown
+    CHECK_EQ(c.failed, 1);    // Corrupt
+    CHECK_EQ(sync.progress().index, 7);
+    CHECK_EQ(sync.progress().indexErrors, 0);
+
+    Bytes got;
+    CHECK(fsx::readBytes(ps3 + "/Missing Cover (USA).png", got) && got == fresh);
+    CHECK(fsx::readBytes(ps3 + "/Different (USA).png", got) && got == fresh2);       // overwritten
+    CHECK(fsx::readBytes(ps3 + "/Current (USA).png", got) && got == plainPng);       // untouched
+    CHECK(fsx::readBytes(ps3 + "/Finished (USA).png", got) && got == markedPng);     // the mark survives
+    CHECK(!fsx::exists(ps3 + "/Unknown (USA).png"));
+    CHECK(fsx::readBytes(ps2 + "/Jpg Game (USA).png", got) && got == fresh);
+    CHECK(fsx::exists(ps2 + "/Jpg Game (USA).jpg"));                                 // the old file is not deleted
+    CHECK(!fsx::exists(ps2 + "/Corrupt (USA).png"));                                 // not written: the id did not match
+    CHECK(!fsx::exists(ps2 + "/Corrupt (USA).png.part"));
+    CHECK(!sync.progress().lastError.empty());
+
+    // download progress moved: some step saw bytes in the middle of an image
+    CHECK(std::any_of(fake.seen.begin(), fake.seen.end(), [](long long n) { return n > 0; }));
+
+    // a second run with the same repository changes nothing and downloads nothing
+    std::vector<library::Game> again;
+    for (const char* n : {"Missing Cover (USA)", "Current (USA)", "Different (USA)"}) again.push_back(gameAt(ps3, n, library::Platform::Ps3));
+    fake.requested.clear();
+    coversync::Sync second(fake, again);
+    runSync(second);
+    CHECK_EQ(second.progress().counts.same, 3);
+    CHECK_EQ(second.progress().counts.added + second.progress().counts.replaced, 0);
+    CHECK_EQ(fake.requested.size(), std::size_t(2));  // only the two lists, no image
+}
+
+static void testCoverSyncFailures() {
+    const std::string root = tempDir("syncfail");
+    fsx::makeDirs(root + "/PS2ISO");
+    fsx::makeDirs(root + "/PSXISO");
+    fsx::writeBytes(root + "/PS2ISO/A (USA).iso", {});
+    fsx::writeBytes(root + "/PSXISO/B (USA).iso", {});
+    std::vector<library::Game> games = {gameAt(root + "/PS2ISO", "A (USA)", library::Platform::Ps2),
+                                        gameAt(root + "/PSXISO", "B (USA)", library::Platform::Psx)};
+
+    {  // offline: every list fails, the run still ends and says so
+        FakeClient fake;
+        coversync::Sync sync(fake, games);
+        runSync(sync);
+        CHECK(sync.done());
+        CHECK_EQ(sync.progress().indexErrors, 2);
+        CHECK_EQ(sync.progress().counts.failed, 2);
+        CHECK_EQ(sync.progress().index, 2);
+    }
+    {  // rate limited (403) on the first repository, fine on the second
+        FakeClient fake;
+        const covers::Source& s2 = covers::sourceFor(library::Platform::Ps2);
+        const covers::Source& s1 = covers::sourceFor(library::Platform::Psx);
+        fake.routes[covers::treeUrl(s2, "master")] = {403, bytesOf("{\"message\":\"rate limit\"}"), false};
+        fake.routes[covers::treeUrl(s1, "master")] = {200, bytesOf(kRootTree), false};
+        fake.routes[covers::treeUrl(s1, "boxtree")] = {200, bytesOf(folderTree({})), false};
+        coversync::Sync sync(fake, games);
+        runSync(sync);
+        CHECK_EQ(sync.progress().indexErrors, 1);
+        CHECK_EQ(sync.progress().counts.failed, 1);
+        CHECK_EQ(sync.progress().counts.missing, 1);
+        CHECK(sync.progress().lastError.find("403") != std::string::npos);
+    }
+    {  // a list the repository cut short is refused
+        FakeClient fake;
+        const covers::Source& s2 = covers::sourceFor(library::Platform::Ps2);
+        fake.routes[covers::treeUrl(s2, "master")] = {200, bytesOf(kRootTree), false};
+        fake.routes[covers::treeUrl(s2, "boxtree")] = {200, bytesOf(R"({"tree":[],"truncated":true})"), false};
+        coversync::Sync sync(fake, {games[0]});
+        runSync(sync);
+        CHECK_EQ(sync.progress().indexErrors, 1);
+    }
+    {  // cancel: stops at once and tells the client
+        FakeClient fake;
+        coversync::Sync sync(fake, games);
+        sync.step();
+        sync.cancel();
+        CHECK(sync.done() && sync.progress().cancelled);
+        CHECK_EQ(fake.cancels, 1);
+    }
+}
+
 static void testGfx() {
     gfx::Canvas c(1280, 720, loadFont(false), loadFont(true));
     CHECK(c.hasFont());
@@ -627,6 +917,7 @@ static platform::Input press(char k) {
         case 'B': i.b = true; break;
         case 'R': i.r = true; break;
         case 'r': i.right = true; break;
+        case 'l': i.left = true; break;
         default: break;
     }
     return i;
@@ -722,10 +1013,41 @@ static void testApp() {
 
     // a missing game list gives a message instead of a crash
     fsx::removeFile(env.xmlPath);
-    app.update(press('r'));   // focus back on "Sort game list"
+    app.update(press('l'));   // focus back on "Sort game list"
     app.update(press('A'));
     CHECK(app.screen() == App::Screen::Message);
     app.draw();
+}
+
+static void testCoversScreen() {
+    const std::string root = tempDir("covscreen");
+    const std::string hdd = root + "/dev_hdd0";
+    fsx::makeDirs(hdd + "/PS3ISO");
+    touch(hdd + "/PS3ISO/Resistance 3 (USA).iso");
+    platform::Env env;
+    env.appDir = hdd + "/hometidy";
+    env.xmlPath = hdd + "/none.xml";
+    env.roots = {{hdd + "/PS3ISO", library::Platform::Ps3}};
+    env.storageOk = true;
+    gfx::Canvas canvas(1280, 720, loadFont(false), loadFont(true));
+    App app(canvas, env);
+    for (int i = 0; i < 6; ++i) {
+        app.update({});
+        app.draw();
+    }
+    app.update(press('r'));  // to the second card
+    app.update(press('r'));  // to the third: Update covers
+    app.update(press('A'));
+    CHECK(app.screen() == App::Screen::Covers);
+    app.draw();
+    app.update(press('A'));  // start: the host client is offline, so the run ends with a failure
+    for (int i = 0; i < 20; ++i) {
+        app.update({});
+        app.draw();
+    }
+    CHECK(app.screen() == App::Screen::Covers);
+    app.update(press('A'));  // back from the summary
+    CHECK(app.screen() == App::Screen::Home);
 }
 
 int main() {
@@ -744,8 +1066,13 @@ int main() {
     testLibrary();
     testSortTasks();
     testCoverTasks();
+    testSha1();
+    testCoverIndex();
+    testCoverSync();
+    testCoverSyncFailures();
     testGfx();
     testApp();
+    testCoversScreen();
     if (g_failed) {
         std::printf("%d check(s) failed\n", g_failed);
         return 1;

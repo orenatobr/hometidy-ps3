@@ -1,9 +1,10 @@
 # HomeTidy for PS3
 
-A PS3 homebrew app for consoles with custom firmware and webMAN MOD. It does two chores you would otherwise do over FTP:
+A PS3 homebrew app for consoles with custom firmware and webMAN MOD. It does three chores you would otherwise do over FTP:
 
 1. **Sort game list**: puts the webMAN game list (`mygames.xml`) in order, A to Z. Games of one series go by release date (see [Series table](#series-table)).
 2. **Mark as completed**: draws a green check on the cover of a game you finished. You can remove it later.
+3. **Update covers**: compares the cover next to each PS3, PS2 and PS1 game with the cover repository and downloads the ones that are missing or different, with a progress bar that names the image being downloaded.
 
 It runs on the console, with the controller. No computer needed. There is a sibling project for the Wii U: [hometidy-wiiu](https://github.com/orenatobr/hometidy-wiiu).
 
@@ -22,7 +23,10 @@ Needs a console with custom firmware and webMAN MOD (written for the setup of th
 | Job | What it touches | Safety |
 | --- | --- | --- |
 | Sort game list | `/dev_hdd0/xmlhost/game_plugin/mygames.xml`, the game list webMAN shows in the XMB. Only the order of the `<I ... />` tags inside each platform segment (PS3, PS2, PS1) changes; titles, covers and mount paths stay as they are, so the file keeps exactly the same size. | Backup first to `/dev_hdd0/hometidy/backup/`, write, read back, and read again after 2 seconds (webMAN can rewrite the file). |
+| Update covers | The cover image next to each game image in `PS3ISO`, `PS2ISO` or `PSXISO` (`<game name>.png`), and the Internet: [libretro-thumbnails](https://github.com/libretro-thumbnails) on GitHub, one repository per platform (`Sony_-_PlayStation_3`, `Sony_-_PlayStation_2`, `Sony_-_PlayStation`), folder `Named_Boxarts`. | The repository tells the git id (SHA-1 of the file) of every image. A local cover with the same id is left alone; a missing or different one is downloaded to `<game name>.png`, checked against the announced id, and only then written (through a `.part` file). A cover marked as completed is never overwritten, so the check survives. An old `.jpg` is not deleted; the new `.png` is the one used. Connections are HTTPS with the certificate checked. |
 | Mark as completed | The cover image next to the game image, in `PS3ISO`, `PS2ISO` or `PSXISO` (`.png` or `.jpg`, same name as the `.iso`). Only the top-left corner of the cover changes. | The first original of each cover is saved to `backup/covers/`. Press the confirm button on a marked game to restore it. A check made by another tool has no saved original: its pixels are rebuilt from the surroundings (approximate). |
+
+**Update covers** needs the console online (and the right date and time, because the certificate check uses them). It reads at most four short lists from the GitHub API (two for the PS1 and PS2 repositories are about 2.5 MB each, less compressed), then one file per image from `raw.githubusercontent.com`. A game is matched by its file name: `Radiata Stories (USA).iso` finds `Radiata Stories (USA).png`; characters the repositories write as `_` (`& * / : < > ? \\ |`) are matched, and a tag such as `[BLUS30443]` is ignored when the full name is not found. A game the repository does not have is counted as "not in the repository". Press the stop button to cancel; what was written stays.
 
 The badge is the same one the `ps3tweaks` FTP cover marker draws (a green rounded square with a white check, about 15% of the cover), so covers marked by either tool are recognized by both.
 
@@ -49,6 +53,7 @@ Patterns are matched as whole words against the lowercase title without punctuat
   backup/mygames_<date>_<time>.xml      game list backups
   backup/covers/<hash>_<name>.png       original covers
   config.txt                            language (lang=en or lang=pt)
+  cacert.pem                            trusted root certificates, written at each cover update
   series.txt                            optional, your series rules
   hometidy.log                          what this run did (flushed line by line)
   hometidy.prev.log                     the run before, kept in case of a crash

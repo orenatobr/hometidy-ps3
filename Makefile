@@ -47,9 +47,10 @@ CXXFLAGS	=	$(CFLAGS) $(CXXFLAGS_INIT) -std=gnu++20 -DAPP_VERSION=\"$(VERSION)\"
 
 LDFLAGS		=	$(MACHDEP) -Wl,-Map,$(notdir $@).map
 
-LIBS		:=	-lrsx -lgcm_sys -lio -lsysutil -lrt -llv2 -lm
+LIBS		:=	-lcurl -lmbedtls -lmbedx509 -lmbedcrypto -lz -lrsx -lgcm_sys -lio -lnet -lsysmodule -lsysutil -lrt -llv2 -lm
 
-LIBDIRS		:=
+# the ps3dev portlibs hold libcurl, mbedTLS and zlib
+LIBDIRS		:=	$(PORTLIBS)
 
 #---------------------------------------------------------------------------------
 # no real need to edit anything past this point unless you need to add additional

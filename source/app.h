@@ -7,6 +7,7 @@
 #include <string>
 #include <vector>
 
+#include "coversync.h"
 #include "gfx.h"
 #include "library.h"
 #include "platform.h"
@@ -15,7 +16,7 @@
 
 class App {
 public:
-    enum class Screen { Loading, Home, SortPreview, SortConfirm, SortDone, Mark, Message };
+    enum class Screen { Loading, Home, SortPreview, SortConfirm, SortDone, Mark, Covers, Message };
 
     /// Args:
     ///     canvas: Drawing surface; must outlive the app.
@@ -46,6 +47,7 @@ private:
     // lifecycle
     void load();
     void loadConfig();
+    void scanGames();
     void saveConfig();
     // screens: update + draw
     void updateHome(const platform::Input& in);
@@ -61,6 +63,11 @@ private:
     void updateMark(const platform::Input& in);
     void drawMark();
     void toggleMark();
+    void enterCovers();
+    void updateCovers(const platform::Input& in);
+    void drawCovers();
+    void startCovers();
+    void drawBar(int x, int y, int w, double fraction, bool unknown);
     void drawMessage();
     // shared pieces
     void header(const std::string& subtitle);
@@ -108,6 +115,9 @@ private:
     int tab_ = 0;
     int markSel_ = 0;
     int markScroll_ = 0;
+    // covers
+    std::unique_ptr<http::Client> http_;
+    std::unique_ptr<coversync::Sync> sync_;
     // message / toast
     std::string msgTitle_, msgBody_;
     gfx::Color msgColor_ = gfx::theme::red;
