@@ -1238,6 +1238,17 @@ static void testTgdbSearch() {
     for (const std::string& r : fake.requested) CHECK(r.rfind("HEAD ", 0) == 0 || r.find("thegamesdb.net/search") != std::string::npos || r.find("api.github.com") != std::string::npos);
 }
 
+// The console checks every server certificate against data/cacert.bin. cdn.thegamesdb.net is signed through
+// Google Trust Services (GTS Root R4, cross-signed by GlobalSign Root CA): without those roots the Sorcery
+// download failed on the console with "SSL peer certificate was not OK".
+static void testCaBundleHasTheRoots() {
+    std::string pem;
+    CHECK(fsx::readFile("data/cacert.bin", pem));
+    int certs = 0;
+    for (auto at = pem.find("-----BEGIN CERTIFICATE-----"); at != std::string::npos; at = pem.find("-----BEGIN CERTIFICATE-----", at + 1)) ++certs;
+    CHECK(certs >= 14);  // 9 before, plus GlobalSign Root CA and GTS Root R1 to R4
+}
+
 static void testCoverSyncFailures() {
     const std::string root = tempDir("syncfail");
     fsx::makeDirs(root + "/PS2ISO");
@@ -1576,6 +1587,7 @@ int main() {
     testCoverSyncSkipsWhatIsHere();
     testCoverSyncKeepsTheMark();
     testTgdbSearch();
+    testCaBundleHasTheRoots();
     testCoverSyncFailures();
     testGfx();
     testApp();
