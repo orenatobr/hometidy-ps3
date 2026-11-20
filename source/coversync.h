@@ -1,14 +1,16 @@
 // Brings the cover images next to the game images up to date from the cover repositories (covers.h).
 //
 // For each game the repository image is looked up by the game name; for a PS3 game the repository does not
-// have, the cover comes from the fallback server (GameTDB) by the title id read from the disc image. A
+// have, the cover comes from the fallback server (GameTDB) by the title id read from the disc image. A game
+// that has no cover anywhere else is looked for by name on TheGamesDB, the second fallback. A
 // download is shrunk to the frame the game list uses (frame.h) and written over the local cover.
 //
 // What is compared is the git blob id the repository lists for the image against the one recorded when the
 // local cover was last written (a small database, since the local file is a shrunk copy and its own id is
-// not the repository's). A local cover that no longer matches what was written (another tool, a mark
-// drawn on it) or that was never written by this app counts as different and is overwritten, a cover
-// marked as completed included. Every download is checked against the announced id before it is used.
+// not the repository's). A local cover that no longer matches what was written (another tool) or that
+// was never written by this app counts as different and is overwritten, a cover marked as completed
+// included, unless it is the same picture with only the mark added (the mark stays).
+// Every download is checked against the announced id before it is used.
 //
 // The sync is a state machine: call step() once per frame and draw progress().
 #pragma once
@@ -73,7 +75,7 @@ public:
     const Progress& progress() const { return progress_; }
 
 private:
-    enum class Stage { Next, RootTree, FolderTree, Game, Link, Download, FallbackHead, Fallback, End };
+    enum class Stage { Next, RootTree, FolderTree, Game, Link, Download, Search, FallbackHead, Fallback, End };
     struct Written {
         std::string remote;  ///< Repository blob id the local cover was made from.
         std::string local;   ///< Blob id of the local file as written.
@@ -86,12 +88,16 @@ private:
     void startDownload(const covers::Remote& remote);
     void pollLink();
     void pollDownload();
+    void pollSearch();
     void pollFallbackHead();
     void pollFallback();
     void useLocalAsSource();
     void startFallback();
     void afterFallbackMiss();
+    void noCover();
+    std::string fallbackUrl() const;
     void store(const std::vector<std::uint8_t>& framed, const std::string& remoteSha, bool fromFallback);
+    bool isMarkedCopyOf(const std::vector<std::uint8_t>& framed) const;
     void buildQueue();
     void indexFailed(const std::string& why);
     void failGame(const std::string& why);
@@ -124,6 +130,8 @@ private:
     std::string titleId_;          ///< PS3 title id for the fallback server.
     std::vector<std::string> regions_;
     std::size_t regionPos_ = 0;
+    std::string searchedUrl_;      ///< Cover found by name on the second fallback server (empty: not asked or none).
+    bool searched_ = false;        ///< The second fallback was already asked for this game.
     std::string validator_;        ///< What the fallback server says identifies the image now (ETag and size).
 };
 

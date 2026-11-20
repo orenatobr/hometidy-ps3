@@ -392,6 +392,50 @@ std::string urlEncode(const std::string& text) {
 }
 }  // namespace
 
+std::string tgdbSearchUrl(library::Platform p, const std::string& gameName) {
+    const char* id = p == library::Platform::Ps3 ? "12" : p == library::Platform::Ps2 ? "11" : "10";
+    return "https://thegamesdb.net/search.php?name=" + urlEncode(split(gameName).base) + "&platform_id%5B%5D=" + id;
+}
+
+namespace {
+
+std::string decodeEntities(std::string s) {
+    static const char* const kPairs[][2] = {{"&amp;", "&"}, {"&#039;", "'"}, {"&#39;", "'"}, {"&quot;", "\""}, {"&lt;", "<"}, {"&gt;", ">"}};
+    for (const auto& pair : kPairs) {
+        for (auto at = s.find(pair[0]); at != std::string::npos; at = s.find(pair[0], at + 1)) s.replace(at, std::strlen(pair[0]), pair[1]);
+    }
+    return s;
+}
+
+}  // namespace
+
+std::string tgdbCoverUrl(const std::string& html, const std::string& gameName) {
+    static const std::string kCard = "<a href=\"./game.php?id=", kHost = "https://cdn.thegamesdb.net/images/thumb/boxart/front/";
+    const std::string want = alnum(split(gameName).base);
+    std::string best;
+    int bestRank = 99;
+    for (auto at = html.find(kCard); !want.empty() && at != std::string::npos;) {
+        const auto next = html.find(kCard, at + kCard.size());
+        const std::string card = html.substr(at, next == std::string::npos ? std::string::npos : next - at);
+        at = next;
+        const auto img = card.find("src=\"" + kHost);  // only the site's own image host is followed
+        const auto foot = card.find("card-footer");
+        const auto open = foot == std::string::npos ? foot : card.find("<p>", foot);
+        const auto close = open == std::string::npos ? open : card.find("</p>", open);
+        if (img == std::string::npos || close == std::string::npos) continue;
+        const auto urlStart = img + 5, urlEnd = card.find('"', urlStart);
+        if (urlEnd == std::string::npos) continue;
+        const std::string url = card.substr(urlStart, urlEnd - urlStart);
+        if (url.find_first_of(" <>'") != std::string::npos || alnum(decodeEntities(card.substr(open + 3, close - open - 3))) != want) continue;
+        const int rank = card.find("NTSC-U") != std::string::npos ? 0 : card.find("PAL") != std::string::npos ? 1 : 2;
+        if (rank < bestRank) {
+            bestRank = rank;
+            best = url;
+        }
+    }
+    return best;
+}
+
 std::string imageUrl(const Source& s, const std::string& remoteName) {
     return std::string("https://raw.githubusercontent.com/") + s.repo + "/" + s.branch + "/" + s.folder + "/" + urlEncode(remoteName) + ".png";
 }

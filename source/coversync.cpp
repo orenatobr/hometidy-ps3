@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <sstream>
 
+#include "badge.h"
 #include "frame.h"
 #include "fsx.h"
 #include "isoinfo.h"
@@ -14,6 +15,7 @@ namespace {
 constexpr std::size_t kMaxIndexBytes = 16u * 1024 * 1024;  // the PS1 and PS2 folder lists are about 2.5 MB
 constexpr std::size_t kMaxImageBytes = 8u * 1024 * 1024;
 constexpr std::size_t kMaxLinkBytes = 4096;
+constexpr std::size_t kMaxPageBytes = 1024u * 1024;  // a TheGamesDB search page is about 20 KB
 constexpr int kMaxHops = 3;
 
 }  // namespace
@@ -61,6 +63,7 @@ void Sync::step() {
         case Stage::Game: nextGame(); break;
         case Stage::Link: pollLink(); break;
         case Stage::Download: pollDownload(); break;
+        case Stage::Search: pollSearch(); break;
         case Stage::FallbackHead: pollFallbackHead(); break;
         case Stage::Fallback: pollFallback(); break;
         case Stage::End: finish(); break;
@@ -181,6 +184,8 @@ void Sync::nextGame() {
     titleId_.clear();
     regions_.clear();
     regionPos_ = 0;
+    searchedUrl_.clear();
+    searched_ = false;
     localSha_ = readLocal();
 
     if (const covers::Remote* r = covers::find(index_, game_->name)) return tryRemote(*r);
@@ -196,8 +201,30 @@ void Sync::nextGame() {
 
 void Sync::afterFallbackMiss() {
     if (const covers::Remote* r = covers::findLoose(index_, game_->name)) return tryRemote(*r);
+    if (searched_) return noCover();
+    searched_ = true;  // last resort: TheGamesDB by name
+    progress_.phase = Phase::Checking;
+    client_.start(covers::tgdbSearchUrl(game_->platform, game_->name), kMaxPageBytes);
+    stage_ = Stage::Search;
+}
+
+void Sync::noCover() {
     ++progress_.counts.missing;
     finishGame();
+}
+
+void Sync::pollSearch() {
+    const http::State st = client_.step();
+    if (st == http::State::Running || st == http::State::Idle) return;
+    if (st == http::State::Failed || client_.status() != 200) return noCover();  // nothing found, not an error of the game
+    const std::vector<std::uint8_t> body = client_.take();
+    searchedUrl_ = covers::tgdbCoverUrl(std::string(body.begin(), body.end()), game_->name);
+    if (searchedUrl_.empty()) return noCover();
+    startFallback();
+}
+
+std::string Sync::fallbackUrl() const {
+    return searchedUrl_.empty() ? covers::gametdbUrl(titleId_, regions_[regionPos_]) : searchedUrl_;
 }
 
 void Sync::tryRemote(const covers::Remote& remote) {
@@ -255,7 +282,21 @@ void Sync::pollLink() {
     tryRemote(*next);
 }
 
+// The cover here is the new one plus the completed mark: the mark is the user's, so it stays.
+bool Sync::isMarkedCopyOf(const std::vector<std::uint8_t>& framed) const {
+    std::vector<std::uint8_t> local;
+    badge::Image have, want;
+    if (localSha_.empty() || !fsx::readBytes(game_->image, local)) return false;
+    if (!badge::decode(local, have) || !badge::decode(framed, want)) return false;
+    return badge::isMarked(have) && badge::sameOutsideBadge(have, want);
+}
+
 void Sync::store(const std::vector<std::uint8_t>& framed, const std::string& remoteSha, bool fromFallback) {
+    if (isMarkedCopyOf(framed)) {  // recorded as current, so the next round skips the download
+        if (!remoteSha.empty()) db_[target_] = {remoteSha, localSha_};
+        ++progress_.counts.same;
+        return finishGame();
+    }
     const std::string written = sha1::gitBlob(framed);
     if (!localSha_.empty() && localSha_ == written) {  // the cover on the console is already this one
         if (!remoteSha.empty()) db_[target_] = {remoteSha, written};
@@ -297,7 +338,7 @@ void Sync::startFallback() {
     progress_.bytes = 0;
     progress_.bytesTotal = -1;
     validator_.clear();
-    client_.startHead(covers::gametdbUrl(titleId_, regions_[regionPos_]));
+    client_.startHead(fallbackUrl());
     stage_ = Stage::FallbackHead;
 }
 
@@ -307,6 +348,7 @@ void Sync::pollFallbackHead() {
     if (st == http::State::Failed) return failGame(client_.error());
     const int status = client_.status();
     if (status == 404) {  // not in this region folder: try the next, then the repository's other names
+        if (!searchedUrl_.empty()) return noCover();
         if (++regionPos_ < regions_.size()) return startFallback();
         return afterFallbackMiss();
     }
@@ -320,7 +362,7 @@ void Sync::pollFallbackHead() {
         return finishGame();
     }
     progress_.phase = Phase::Downloading;
-    client_.start(covers::gametdbUrl(titleId_, regions_[regionPos_]), kMaxImageBytes);
+    client_.start(fallbackUrl(), kMaxImageBytes);
     stage_ = Stage::Fallback;
 }
 
@@ -332,6 +374,7 @@ void Sync::pollFallback() {
     if (st == http::State::Running || st == http::State::Idle) return;
     if (st == http::State::Failed) return failGame(client_.error());
     if (client_.status() == 404) {
+        if (!searchedUrl_.empty()) return noCover();
         if (++regionPos_ < regions_.size()) return startFallback();
         return afterFallbackMiss();
     }
