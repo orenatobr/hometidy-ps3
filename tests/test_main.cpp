@@ -1075,10 +1075,11 @@ static void testCoverSync() {
     for (const std::string& url : fake.requested) {
         const bool list = url.find("api.github.com") != std::string::npos;
         const bool head = url.compare(0, 5, "HEAD ") == 0;
-        CHECK(list || head || url.find("Corrupt") != std::string::npos);
+        const bool search = url.find("thegamesdb.net/search") != std::string::npos;  // nothing else has the cover
+        CHECK(list || head || search || url.find("Corrupt") != std::string::npos);
     }
 
-    // a cover changed afterwards (the completed mark drawn again) no longer matches what was written: overwritten
+    // the completed mark drawn afterwards is the user's: the same picture with the mark is kept, not overwritten
     badge::Image again;
     CHECK(fsx::readBytes(ps3 + "/Missing Cover (USA).png", got) && badge::decode(got, again));
     badge::apply(again);
@@ -1087,8 +1088,8 @@ static void testCoverSync() {
     fsx::writeBytes(ps3 + "/Missing Cover (USA).png", markedPng);
     coversync::Sync third(fake, gamesNow(), db);
     runSync(third);
-    CHECK_EQ(third.progress().counts.replaced, 1);
-    CHECK(fsx::readBytes(ps3 + "/Missing Cover (USA).png", got) && badge::decode(got, again) && !badge::isMarked(again));
+    CHECK_EQ(third.progress().counts.replaced, 0);
+    CHECK(fsx::readBytes(ps3 + "/Missing Cover (USA).png", got) && got == markedPng);
 
     // the repository image changed: the id differs from the recorded one and the cover is fetched again
     const Bytes newer = imageBytes(320, 320);
@@ -1136,6 +1137,105 @@ static void testCoverSyncSkipsWhatIsHere() {
     runSync(again);
     CHECK_EQ(again.progress().counts.same, 1);
     CHECK_EQ(fake.requested.size(), std::size_t(2));
+}
+
+static void testCoverSyncKeepsTheMark() {
+    const std::string root = tempDir("syncmark");
+    const std::string dir = root + "/PS2ISO";
+    fsx::makeDirs(dir);
+    const covers::Source& s2 = covers::sourceFor(library::Platform::Ps2);
+    const Bytes real = imageBytes(500, 700);
+    // what the sync writes for this image, with the completed mark drawn on it afterwards
+    Bytes shrunk;
+    frame::fit(real, frame::kSize, shrunk);
+    badge::Image marked;
+    badge::decode(shrunk, marked);
+    badge::apply(marked);
+    Bytes markedFile;
+    badge::encode(marked, badge::Format::Png, markedFile);
+    fsx::writeBytes(dir + "/Done (USA).iso", {});
+    fsx::writeBytes(dir + "/Done (USA).png", markedFile);
+
+    FakeClient fake;
+    fake.routes[covers::treeUrl(s2, "master")] = {200, bytesOf(kRootTree), false};
+    fake.routes[covers::treeUrl(s2, "boxtree")] = {200, bytesOf(folderTree({{"Done (USA).png", sha1::gitBlob(real)}})), false};
+    fake.routes[covers::imageUrl(s2, "Done (USA)")] = {200, real, false};
+    coversync::Sync sync(fake, {gameAt(dir, "Done (USA)", library::Platform::Ps2)}, root + "/covers.db");
+    runSync(sync);
+    CHECK_EQ(sync.progress().counts.same, 1);
+    CHECK_EQ(sync.progress().counts.replaced, 0);
+    Bytes now;
+    fsx::readBytes(dir + "/Done (USA).png", now);
+    CHECK(now == markedFile);  // the mark is still there
+
+    // the next run does not even download it
+    fake.requested.clear();
+    coversync::Sync again(fake, {gameAt(dir, "Done (USA)", library::Platform::Ps2)}, root + "/covers.db");
+    runSync(again);
+    CHECK_EQ(again.progress().counts.same, 1);
+    CHECK_EQ(fake.requested.size(), std::size_t(2));
+
+    // a marked cover of another picture is still replaced
+    const Bytes other = imageBytes(500, 700);
+    badge::Image otherImg = makeCover(160, 160);
+    for (std::size_t i = 0; i < otherImg.rgba.size(); i += 4) otherImg.rgba[i] = 7;
+    badge::apply(otherImg);
+    Bytes otherFile;
+    badge::encode(otherImg, badge::Format::Png, otherFile);
+    fsx::writeBytes(dir + "/Done (USA).png", otherFile);
+    coversync::Sync third(fake, {gameAt(dir, "Done (USA)", library::Platform::Ps2)}, root + "/covers2.db");
+    runSync(third);
+    CHECK_EQ(third.progress().counts.replaced, 1);
+    (void)other;
+}
+
+static void testTgdbSearch() {
+    const std::string page =
+        "<div id=\"display\"><div><a href=\"./game.php?id=120631\"><div class=\"card\">"
+        "<img class=\"card-img-top\" src=\"https://cdn.thegamesdb.net/images/thumb/boxart/front/120631-1.jpg\">"
+        "<div class=\"card-footer\"><p>Sorcery: Swiat Magii</p><p>PAL</p></div></div></a></div>"
+        "<div><a href=\"./game.php?id=12671\"><div class=\"card\">"
+        "<img class=\"card-img-top\" src=\"https://cdn.thegamesdb.net/images/thumb/boxart/front/12671-1.jpg\">"
+        "<div class=\"card-footer\"><p>Sorcery</p><p>PAL</p></div></div></a></div>"
+        "<div><a href=\"./game.php?id=12670\"><div class=\"card\">"
+        "<img class=\"card-img-top\" src=\"https://cdn.thegamesdb.net/images/thumb/boxart/front/12670-1.jpg\">"
+        "<div class=\"card-footer\"><p>Sorcery</p><p>NTSC-U</p></div></div></a></div>"
+        "<div><a href=\"./game.php?id=9\"><div class=\"card\">"
+        "<img class=\"card-img-top\" src=\"https://evil.example/x.jpg\">"
+        "<div class=\"card-footer\"><p>Other</p><p>NTSC-U</p></div></div></a></div></div>";
+    CHECK_EQ(covers::tgdbCoverUrl(page, "Sorcery [BCUS98203]"), std::string("https://cdn.thegamesdb.net/images/thumb/boxart/front/12670-1.jpg"));
+    CHECK_EQ(covers::tgdbCoverUrl(page, "Other (USA)"), std::string());  // not on the site's own image host
+    CHECK_EQ(covers::tgdbCoverUrl(page, "Sorcer"), std::string());       // the whole title must match
+    CHECK_EQ(covers::tgdbSearchUrl(library::Platform::Ps3, "Sorcery [BCUS98203]"),
+             std::string("https://thegamesdb.net/search.php?name=Sorcery&platform_id%5B%5D=12"));
+
+    // the sync asks it when nothing else has the cover, and keeps the answer
+    const std::string root = tempDir("synctgdb");
+    const std::string dir = root + "/PS3ISO";
+    fsx::makeDirs(dir);
+    fsx::writeBytes(dir + "/Sorcery (USA).iso", makeIso("BCUS98203"));
+    const covers::Source& s3 = covers::sourceFor(library::Platform::Ps3);
+    const Bytes thumb = imageBytes(300, 348, badge::Format::Jpeg);
+    FakeClient fake;
+    fake.routes[covers::treeUrl(s3, "master")] = {200, bytesOf(kRootTree), false};
+    fake.routes[covers::treeUrl(s3, "boxtree")] = {200, bytesOf(folderTree({})), false};
+    fake.routes[covers::tgdbSearchUrl(library::Platform::Ps3, "Sorcery (USA)")] = {200, bytesOf(page), false};
+    FakeClient::Route img{200, thumb, false};
+    img.headers = {{"etag", "\"t1\""}, {"content-length", std::to_string(thumb.size())}};
+    fake.routes["https://cdn.thegamesdb.net/images/thumb/boxart/front/12670-1.jpg"] = img;
+    const std::string db = root + "/covers.db";
+    coversync::Sync sync(fake, {gameAt(dir, "Sorcery (USA)", library::Platform::Ps3)}, db);
+    runSync(sync);
+    CHECK_EQ(sync.progress().counts.added, 1);
+    CHECK_EQ(sync.progress().counts.fallback, 1);
+    CHECK_EQ(sync.progress().counts.missing, 0);
+    CHECK(framed(dir + "/Sorcery (USA).png"));
+
+    fake.requested.clear();
+    coversync::Sync again(fake, {gameAt(dir, "Sorcery (USA)", library::Platform::Ps3)}, db);
+    runSync(again);
+    CHECK_EQ(again.progress().counts.same, 1);
+    for (const std::string& r : fake.requested) CHECK(r.rfind("HEAD ", 0) == 0 || r.find("thegamesdb.net/search") != std::string::npos || r.find("api.github.com") != std::string::npos);
 }
 
 static void testCoverSyncFailures() {
@@ -1474,6 +1574,8 @@ int main() {
     testFrame();
     testCoverSync();
     testCoverSyncSkipsWhatIsHere();
+    testCoverSyncKeepsTheMark();
+    testTgdbSearch();
     testCoverSyncFailures();
     testGfx();
     testApp();

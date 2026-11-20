@@ -216,3 +216,25 @@ bool isMarked(const Image& image) {
 }
 
 }  // namespace badge
+
+namespace badge {
+
+bool sameOutsideBadge(const Image& a, const Image& b) {
+    if (a.w != b.w || a.h != b.h || a.rgba.size() != b.rgba.size() || a.w < kMinSize || a.h < kMinSize) return false;
+    const Box box = boxFor(a.w, a.h);
+    const int x0 = box.x - 1, x1 = box.x + box.side + 1, y0 = box.y - 1, y1 = box.y + box.side + 1;  // what apply() may touch
+    for (int y = 0; y < a.h; ++y) {
+        for (int x = 0; x < a.w; ++x) {
+            if (x >= x0 && x <= x1 && y >= y0 && y <= y1) continue;
+            const std::uint8_t* p = px(a, x, y);
+            const std::uint8_t* q = px(b, x, y);
+            if (p[3] == 0 && q[3] == 0) continue;
+            for (int k = 0; k < 4; ++k) {
+                if (!near(p[k], q[k], 2)) return false;
+            }
+        }
+    }
+    return true;
+}
+
+}  // namespace badge

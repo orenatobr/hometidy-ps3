@@ -50,4 +50,9 @@ void erase(Image& image);
 /// True when the badge colours are present where apply() paints them.
 bool isMarked(const Image& image);
 
+/// True when two images of the same size match everywhere except under the badge square, so a marked
+/// cover can be told from the same cover without the mark. Pixels that are fully transparent count as equal
+/// whatever their colour (editors rewrite it), and each channel may differ by up to 2.
+bool sameOutsideBadge(const Image& a, const Image& b);
+
 }  // namespace badge

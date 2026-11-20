@@ -88,6 +88,14 @@ std::vector<std::string> gametdbRegions(const std::string& titleId);
 /// GameTDB cover of a PS3 title id (the fallback server, used when the repository has no cover for a game).
 std::string gametdbUrl(const std::string& titleId, const std::string& region);
 
+/// Second fallback, for a game neither the repository nor GameTDB has (PS3 "Sorcery"): TheGamesDB, found by
+/// name. The search page of a game name (tags like "(USA)" and "[BCUS98203]" dropped), on the platform's list.
+std::string tgdbSearchUrl(library::Platform p, const std::string& gameName);
+
+/// Reads a TheGamesDB search page and returns the cover thumbnail of the game whose title is the game's
+/// (case and punctuation ignored); NTSC-U first, then PAL, then any region. Empty when there is none.
+std::string tgdbCoverUrl(const std::string& html, const std::string& gameName);
+
 /// Address of an image on the raw file server.
 std::string imageUrl(const Source& s, const std::string& remoteName);
 
