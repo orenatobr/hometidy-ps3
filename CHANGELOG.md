@@ -2,6 +2,9 @@
 
 Every release lists what changed here, newest first. The section of a version is its release notes: `tools/release_notes.sh` prints it and `tools/dist.sh` refuses to package a version that has none. The version lives in `VERSION`; the app, `PARAM.SFO`, the package art and the file names (`hometidy_ps3_v<version>.pkg`) all read it, and the tag is `v<version>`.
 
+## v1.3.2
+- LittleBigPlanet Karting now comes after LittleBigPlanet 3. It is a spin-off, and its real 2012 release date put it between 2 and 3. The rule keeps a later date on purpose, so the series reads LittleBigPlanet, 2, 3, Karting. A test covers both the series and the full library order.
+
 ## v1.3.1
 - Sorcery failed on the console with "SSL peer certificate or SSH remote key was not OK" (found in `/dev_hdd0/hometidy/hometidy.log`). The TheGamesDB search page is served with a Let's Encrypt certificate (ISRG Root X1, already trusted), but its images come from `cdn.thegamesdb.net`, signed by Google Trust Services (chain to GTS Root R4, cross-signed by GlobalSign Root CA), and those roots were not in `data/cacert.bin`. The bundle now also has GlobalSign Root CA and GTS Root R1 to R4. Checked with `openssl s_client -CAfile data/cacert.bin -verify_return_error` against `cdn.thegamesdb.net`, `thegamesdb.net`, `art.gametdb.com`, `raw.githubusercontent.com` and `api.github.com`: all verify, and the old bundle fails on the CDN with "unable to get local issuer certificate". A test counts the roots in the bundle.
 - The v1.3.0 notes said the TheGamesDB download was checked on the real site; that check covered the search page and the parser, not the image host's certificate on the console. The next console run is the real test.
