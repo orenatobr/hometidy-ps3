@@ -89,8 +89,8 @@ static void testSeriesOrder() {
     using V = std::vector<std::string>;
     CHECK_EQ(sortTitles({"LittleBigPlanet 3 (USA)", "LittleBigPlanet (USA)", "LittleBigPlanet Karting (USA)",
                          "LittleBigPlanet 2 (USA)"}),
-             (V{"LittleBigPlanet (USA)", "LittleBigPlanet 2 (USA)", "LittleBigPlanet Karting (USA)",
-                "LittleBigPlanet 3 (USA)"}));
+             (V{"LittleBigPlanet (USA)", "LittleBigPlanet 2 (USA)", "LittleBigPlanet 3 (USA)",
+                "LittleBigPlanet Karting (USA)"}));
     CHECK_EQ(sortTitles({"Ratchet & Clank - Into the Nexus (USA)", "Ratchet & Clank Future - A Crack in Time (USA)",
                          "Ratchet & Clank Future - Tools of Destruction (USA)"}),
              (V{"Ratchet & Clank Future - Tools of Destruction (USA)", "Ratchet & Clank Future - A Crack in Time (USA)",
@@ -201,7 +201,7 @@ static void testUserLibrary() {
     const std::vector<std::string> want = {
         "Alpha Protocol", "Drakengard 3", "Enchanted Arms", "Eternal Sonata", "Folklore", "God of War", "Guitar Hero",
         "Heavenly Sword", "Infamous", "Infamous 2", "Killzone 2", "Killzone 3", "LittleBigPlanet", "LittleBigPlanet 2",
-        "LittleBigPlanet Karting", "LittleBigPlanet 3", "PlayStation All-Stars", "Puppeteer", "Tools of Destruction",
+        "LittleBigPlanet 3", "LittleBigPlanet Karting", "PlayStation All-Stars", "Puppeteer", "Tools of Destruction",
         "A Crack in Time", "Into the Nexus", "Fall of Man", "Resistance 2", "Resistance 3", "Homecoming", "Downpour",
         "Sly Cooper", "Sorcery", "Graces f", "Xillia (USA)", "Xillia 2", "White Knight Chronicles II", "Yakuza"};
     CHECK_EQ(sorted.size(), want.size());

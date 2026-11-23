@@ -34,7 +34,7 @@ resistance 3                    | resistance | 2011-09
 infamous festival of blood      | infamous | 2011-10
 infamous 2                      | infamous | 2011-06
 infamous                        | infamous | 2009-05
-littlebigplanet karting         | littlebigplanet | 2012-11
+littlebigplanet karting         | littlebigplanet | 2014-12  # spin-off (really 2012-11), kept after the numbered games
 littlebigplanet 2               | littlebigplanet | 2011-01
 littlebigplanet 3               | littlebigplanet | 2014-11
 littlebigplanet                 | littlebigplanet | 2008-10
